@@ -6,13 +6,11 @@
 
 import {
   Contract,
-  Networks,
-  SorobanRpc,
+  rpc as SorobanRpc,
   TransactionBuilder,
   BASE_FEE,
   nativeToScVal,
   scValToNative,
-  Address,
   xdr,
 } from "@stellar/stellar-sdk";
 import { signTransaction } from "./wallet.js";
@@ -47,7 +45,9 @@ export class StellarSplitClient {
 
   constructor(config: StellarSplitClientConfig) {
     this.config = config;
-    this.server = new SorobanRpc.Server(config.rpcUrl, { allowHttp: config.rpcUrl.startsWith("http://") });
+    this.server = new SorobanRpc.Server(config.rpcUrl, {
+      allowHttp: config.rpcUrl.startsWith("http://"),
+    });
     this.contract = new Contract(config.contractId);
   }
 
@@ -111,7 +111,8 @@ export class StellarSplitClient {
     );
 
     const account = await this.server.getAccount(this.config.contractId).catch(() => null);
-    const sourceAccount = account ?? { accountId: () => this.config.contractId, sequenceNumber: () => "0", incrementSequenceNumber: () => {} } as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sourceAccount = account ?? ({ accountId: () => this.config.contractId, sequenceNumber: () => "0", incrementSequenceNumber: () => {} } as any);
 
     const tx = new TransactionBuilder(sourceAccount, {
       fee: BASE_FEE,
@@ -159,7 +160,6 @@ export class StellarSplitClient {
       .setTimeout(30)
       .build();
 
-    // Simulate to get the footprint.
     const simResult = await this.server.simulateTransaction(tx);
     if (SorobanRpc.Api.isSimulationError(simResult)) {
       throw new Error(`Simulation failed: ${simResult.error}`);
@@ -179,11 +179,13 @@ export class StellarSplitClient {
       throw new Error(`Transaction failed: ${JSON.stringify(sendResult.errorResult)}`);
     }
 
-    // Poll for confirmation.
     const txHash = sendResult.hash;
     let getResult = await this.server.getTransaction(txHash);
     let attempts = 0;
-    while (getResult.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND && attempts < 20) {
+    while (
+      getResult.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+      attempts < 20
+    ) {
       await new Promise((r) => setTimeout(r, 1500));
       getResult = await this.server.getTransaction(txHash);
       attempts++;
@@ -193,7 +195,9 @@ export class StellarSplitClient {
       throw new Error(`Transaction not confirmed: ${getResult.status}`);
     }
 
-    const returnValue = (getResult as SorobanRpc.Api.GetSuccessfulTransactionResponse).returnValue ?? xdr.ScVal.scvVoid();
+    const returnValue =
+      (getResult as SorobanRpc.Api.GetSuccessfulTransactionResponse).returnValue ??
+      xdr.ScVal.scvVoid();
     return { txHash, returnValue };
   }
 

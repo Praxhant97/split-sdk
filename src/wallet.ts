@@ -6,30 +6,32 @@
 
 import {
   isConnected,
-  getPublicKey as freighterGetPublicKey,
+  getAddress,
   signTransaction as freighterSignTransaction,
   requestAccess,
 } from "@stellar/freighter-api";
 
 /** Connect to the Freighter wallet extension and request access. */
 export async function connectWallet(): Promise<string> {
-  const connected = await isConnected();
+  const { isConnected: connected } = await isConnected();
   if (!connected) {
     throw new Error(
       "Freighter wallet is not installed. Please install it from https://freighter.app"
     );
   }
   await requestAccess();
-  return freighterGetPublicKey();
+  const { address } = await getAddress();
+  return address;
 }
 
 /** Return the connected wallet's public key (G... address). */
 export async function getPublicKey(): Promise<string> {
-  const connected = await isConnected();
+  const { isConnected: connected } = await isConnected();
   if (!connected) {
     throw new Error("Freighter wallet is not connected.");
   }
-  return freighterGetPublicKey();
+  const { address } = await getAddress();
+  return address;
 }
 
 /**
@@ -44,7 +46,7 @@ export async function signTransaction(
   network: string
 ): Promise<string> {
   const result = await freighterSignTransaction(xdr, { networkPassphrase: network });
+  // v3 API returns { signedTxXdr } or a plain string depending on version
   if (typeof result === "string") return result;
-  // Newer versions return { signedTxXdr }
   return (result as { signedTxXdr: string }).signedTxXdr;
 }

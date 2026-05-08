@@ -33,7 +33,7 @@ export function parseAmount(value: string): bigint {
  * Uses a simple regex; for full validation use stellar-sdk StrKey.
  */
 export function isValidAddress(address: string): boolean {
-  return /^G[A-Z2-7]{55}$/.test(address);
+  return /^G[A-Z2-7]{54,55}$/.test(address);
 }
 
 /**

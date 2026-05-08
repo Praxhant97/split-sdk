@@ -95,6 +95,6 @@ describe("truncateAddress", () => {
   it("respects custom chars param", () => {
     const addr = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
     const result = truncateAddress(addr, 6);
-    expect(result).toBe("GAAZI4...OCCWN");
+    expect(result).toBe("GAAZI4...KOCCWN");
   });
 });
