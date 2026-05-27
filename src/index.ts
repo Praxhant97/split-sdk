@@ -18,6 +18,8 @@ export {
 
 export { pollUSDCBalance, initPoller } from "./poller.js";
 
+export { telemetry } from "./telemetry.js";
+
 export type {
   Invoice,
   Payment,

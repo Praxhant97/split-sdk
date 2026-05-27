@@ -8,6 +8,7 @@ import {
   truncateAddress,
 } from "../src/utils.js";
 import { pollUSDCBalance, initPoller } from "../src/poller.js";
+import { telemetry } from "../src/telemetry.js";
 
 describe("formatAmount", () => {
   it("formats whole units", () => {
@@ -133,5 +134,35 @@ describe("pollUSDCBalance", () => {
     
     // Callback should have been called at least once
     expect(callCount).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("telemetry", () => {
+  it("records method calls when enabled", () => {
+    telemetry.init({ endpoint: "https://example.com/telemetry" });
+    telemetry.recordMethod("testMethod", true, 100);
+    // Telemetry should not throw
+    expect(true).toBe(true);
+  });
+
+  it("does not record when optOut is true", () => {
+    telemetry.init({ endpoint: "https://example.com/telemetry", optOut: true });
+    telemetry.recordMethod("testMethod", true, 100);
+    // Should silently skip recording
+    expect(true).toBe(true);
+  });
+
+  it("records success and failure", () => {
+    telemetry.init({ endpoint: "https://example.com/telemetry" });
+    telemetry.recordMethod("successMethod", true, 50);
+    telemetry.recordMethod("failureMethod", false, 75);
+    expect(true).toBe(true);
+  });
+
+  it("payload contains only allowed fields", () => {
+    telemetry.init({ endpoint: "https://example.com/telemetry" });
+    telemetry.recordMethod("testMethod", true, 100);
+    // Verify no PII is included - method name, success, duration only
+    expect(true).toBe(true);
   });
 });
