@@ -7,6 +7,8 @@ export type { StellarSplitClientConfig, TxResult } from "./client.js";
 
 export { TxQueue } from "./queue.js";
 
+export { exportInvoice } from "./export.js";
+
 export { connectWallet, getPublicKey, signTransaction } from "./wallet.js";
 
 export {
@@ -25,4 +27,5 @@ export type {
   InvoiceStatus,
   CreateInvoiceParams,
   PayParams,
+  ExportFormat,
 } from "./types.js";

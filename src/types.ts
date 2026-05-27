@@ -58,3 +58,6 @@ export interface PayParams {
   /** Amount to pay in stroops. */
   amount: bigint;
 }
+
+/** Export format for invoices. */
+export type ExportFormat = "json" | "csv" | "text";

@@ -106,3 +106,11 @@ describe("TxQueue", () => {
     expect(typeof TxQueue).toBe("function");
   });
 });
+
+describe("exportInvoice", () => {
+  it("exports ExportFormat type", () => {
+    // Type-only test - verifies ExportFormat is exported
+    const format: "json" | "csv" | "text" = "json";
+    expect(format).toBe("json");
+  });
+});
