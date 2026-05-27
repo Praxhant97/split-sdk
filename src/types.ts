@@ -58,3 +58,23 @@ export interface PayParams {
   /** Amount to pay in stroops. */
   amount: bigint;
 }
+
+/** A group of linked invoices. */
+export interface InvoiceGroup {
+  /** Group ID. */
+  groupId: string;
+  /** Invoice IDs in the group. */
+  invoiceIds: string[];
+  /** Whether all invoices in the group are fully funded. */
+  allFunded: boolean;
+}
+
+/** Vesting schedule for an invoice with cliff. */
+export interface VestingSchedule {
+  /** Unix timestamp of the cliff date. */
+  cliffDate: number;
+  /** Unix timestamp when fully vested. */
+  fullyVestedDate: number;
+  /** Calculate claimable amount at a given timestamp. */
+  claimableAt: (timestamp: number) => bigint;
+}
