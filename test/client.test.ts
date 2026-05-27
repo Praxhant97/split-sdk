@@ -7,6 +7,8 @@ import {
   isExpired,
   truncateAddress,
 } from "../src/utils.js";
+import { calculateVesting } from "../src/vesting.js";
+import type { Invoice } from "../src/types.js";
 
 describe("formatAmount", () => {
   it("formats whole units", () => {
@@ -96,5 +98,48 @@ describe("truncateAddress", () => {
     const addr = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
     const result = truncateAddress(addr, 6);
     expect(result).toBe("GAAZI4...KOCCWN");
+  });
+});
+
+describe("calculateVesting", () => {
+  const mockInvoice: Invoice & { vestingCliff?: number; dripDuration?: number } = {
+    id: "1",
+    creator: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+    recipients: [
+      {
+        address: "GBRPYHIL2CI3WHZDTOOQFC6EB4NCCCBFUJZMUWEALWDSDW7Y2M5XWDP",
+        amount: 100_000_000n,
+      },
+    ],
+    token: "CBBD47AB7C010CB047B57A1C1FB990F309A8F323F8C0EB20E5FF0DCD5891986D",
+    deadline: 1700000000,
+    funded: 0n,
+    status: "Pending",
+    payments: [],
+    vestingCliff: 1700000000,
+    dripDuration: 86400, // 1 day
+  };
+
+  it("returns 0 before cliff", () => {
+    const schedule = calculateVesting(mockInvoice);
+    expect(schedule.claimableAt(1699999999)).toBe(0n);
+  });
+
+  it("returns full amount after vesting", () => {
+    const schedule = calculateVesting(mockInvoice);
+    expect(schedule.claimableAt(1700086400)).toBe(100_000_000n);
+  });
+
+  it("returns partial amount during vesting", () => {
+    const schedule = calculateVesting(mockInvoice);
+    const halfwayTime = 1700000000 + 43200; // 12 hours
+    const claimable = schedule.claimableAt(halfwayTime);
+    expect(claimable).toBe(50_000_000n);
+  });
+
+  it("has correct cliff and vested dates", () => {
+    const schedule = calculateVesting(mockInvoice);
+    expect(schedule.cliffDate).toBe(1700000000);
+    expect(schedule.fullyVestedDate).toBe(1700086400);
   });
 });
