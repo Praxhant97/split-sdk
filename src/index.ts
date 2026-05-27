@@ -25,4 +25,5 @@ export type {
   InvoiceStatus,
   CreateInvoiceParams,
   PayParams,
+  InvoiceTemplate,
 } from "./types.js";

@@ -58,3 +58,13 @@ export interface PayParams {
   /** Amount to pay in stroops. */
   amount: bigint;
 }
+
+/** An invoice template for reuse. */
+export interface InvoiceTemplate {
+  /** Template name. */
+  name: string;
+  /** Recipients and their owed amounts. */
+  recipients: Recipient[];
+  /** USDC token contract address. */
+  token: string;
+}

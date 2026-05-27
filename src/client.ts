@@ -21,6 +21,7 @@ import type {
   Payment,
   PayParams,
   Recipient,
+  InvoiceTemplate,
 } from "./types.js";
 
 /** Configuration for StellarSplitClient. */
@@ -139,6 +140,90 @@ export class StellarSplitClient {
   async getPayments(invoiceId: string): Promise<Payment[]> {
     const invoice = await this.getInvoice(invoiceId);
     return invoice.payments;
+  }
+
+  /**
+   * Save an invoice template for reuse.
+   *
+   * @returns The transaction hash.
+   */
+  async saveTemplate(
+    creator: string,
+    template: InvoiceTemplate
+  ): Promise<TxResult> {
+    const recipientAddresses = template.recipients.map((r) =>
+      nativeToScVal(r.address, { type: "address" })
+    );
+    const recipientAmounts = template.recipients.map((r) =>
+      nativeToScVal(r.amount, { type: "i128" })
+    );
+
+    const operation = this.contract.call(
+      "save_template",
+      nativeToScVal(creator, { type: "address" }),
+      nativeToScVal(template.name, { type: "string" }),
+      xdr.ScVal.scvVec(recipientAddresses),
+      xdr.ScVal.scvVec(recipientAmounts),
+      nativeToScVal(template.token, { type: "address" })
+    );
+
+    const result = await this._submitTx(creator, operation);
+    return { txHash: result.txHash };
+  }
+
+  /**
+   * Create an invoice from a saved template.
+   *
+   * @returns The new invoice ID and the transaction hash.
+   */
+  async createFromTemplate(
+    creator: string,
+    templateName: string,
+    deadline: number
+  ): Promise<{ invoiceId: string; txHash: string }> {
+    const operation = this.contract.call(
+      "create_from_template",
+      nativeToScVal(creator, { type: "address" }),
+      nativeToScVal(templateName, { type: "string" }),
+      nativeToScVal(deadline, { type: "u64" })
+    );
+
+    const result = await this._submitTx(creator, operation);
+    const invoiceId = scValToNative(result.returnValue).toString();
+    return { invoiceId, txHash: result.txHash };
+  }
+
+  /**
+   * List all template names for a creator.
+   */
+  async listTemplates(creator: string): Promise<string[]> {
+    const operation = this.contract.call(
+      "list_templates",
+      nativeToScVal(creator, { type: "address" })
+    );
+
+    const account = await this.server.getAccount(this.config.contractId).catch(() => null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sourceAccount = account ?? ({ accountId: () => this.config.contractId, sequenceNumber: () => "0", incrementSequenceNumber: () => {} } as any);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: BASE_FEE,
+      networkPassphrase: this.config.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(30)
+      .build();
+
+    const simResult = await this.server.simulateTransaction(tx);
+    if (SorobanRpc.Api.isSimulationError(simResult)) {
+      throw new Error(`Simulation failed: ${simResult.error}`);
+    }
+
+    const returnVal = (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+    if (!returnVal) throw new Error("No return value from list_templates");
+
+    const templates = scValToNative(returnVal);
+    return Array.isArray(templates) ? templates : [];
   }
 
   // ---------------------------------------------------------------------------
