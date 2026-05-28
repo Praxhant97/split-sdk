@@ -35,6 +35,8 @@ export interface Invoice {
   status: InvoiceStatus;
   /** All payments recorded on-chain. */
   payments: Payment[];
+  /** Whether this is a recurring invoice. */
+  recurring?: boolean;
 }
 
 /** Parameters for creating an invoice. */
@@ -59,22 +61,12 @@ export interface PayParams {
   amount: bigint;
 }
 
-/** A group of linked invoices. */
-export interface InvoiceGroup {
-  /** Group ID. */
-  groupId: string;
-  /** Invoice IDs in the group. */
-  invoiceIds: string[];
-  /** Whether all invoices in the group are fully funded. */
-  allFunded: boolean;
-}
-
-/** Vesting schedule for an invoice with cliff. */
-export interface VestingSchedule {
-  /** Unix timestamp of the cliff date. */
-  cliffDate: number;
-  /** Unix timestamp when fully vested. */
-  fullyVestedDate: number;
-  /** Calculate claimable amount at a given timestamp. */
-  claimableAt: (timestamp: number) => bigint;
+/** An invoice template for reuse. */
+export interface InvoiceTemplate {
+  /** Template name. */
+  name: string;
+  /** Recipients and their owed amounts. */
+  recipients: Recipient[];
+  /** USDC token contract address. */
+  token: string;
 }

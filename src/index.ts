@@ -7,6 +7,12 @@ export type { StellarSplitClientConfig, TxResult } from "./client.js";
 
 export { connectWallet, getPublicKey, signTransaction } from "./wallet.js";
 
+export { checkRPCHealth } from "./health.js";
+
+export { getOptimisticInvoice } from "./optimistic.js";
+
+export { watchContractUpgrade } from "./upgrade.js";
+
 export {
   formatAmount,
   parseAmount,
@@ -16,10 +22,9 @@ export {
   truncateAddress,
 } from "./utils.js";
 
-export { searchInvoices } from "./search.js";
-export type { SearchQuery, SearchResult } from "./search.js";
+export { pollUSDCBalance, initPoller } from "./poller.js";
 
-export { calculateVesting } from "./vesting.js";
+export { telemetry } from "./telemetry.js";
 
 export type {
   Invoice,
@@ -28,6 +33,5 @@ export type {
   InvoiceStatus,
   CreateInvoiceParams,
   PayParams,
-  InvoiceGroup,
-  VestingSchedule,
+  InvoiceTemplate,
 } from "./types.js";
