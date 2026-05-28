@@ -15,15 +15,19 @@ import {
 } from "@stellar/stellar-sdk";
 import { signTransaction } from "./wallet.js";
 import { telemetry } from "./telemetry.js";
+import { checkRPCHealth } from "./health.js";
 import type {
   CreateInvoiceParams,
   Invoice,
   InvoiceGroup,
   InvoiceStatus,
+  PaginatedResult,
+  PaginationOptions,
   Payment,
   PayParams,
   Recipient,
   InvoiceTemplate,
+  RPCHealth,
 } from "./types.js";
 
 /** Configuration for StellarSplitClient. */
@@ -377,7 +381,8 @@ export class StellarSplitClient {
   async getRecurringInvoices(creator: string): Promise<Invoice[]> {
     const startTime = Date.now();
     try {
-      const invoices = await this.getInvoicesByCreator(creator);
+      const page = await this.getInvoicesByCreator(creator);
+      const invoices = await Promise.all(page.items.map((id) => this.getInvoice(id)));
       const recurring = invoices.filter((inv) => inv.recurring === true);
       telemetry.recordMethod("getRecurringInvoices", true, Date.now() - startTime);
       return recurring;
@@ -441,9 +446,18 @@ export class StellarSplitClient {
   }
 
   /**
-   * Get all invoices created by an address.
+   * Get invoices created by an address, with cursor-based pagination.
+   *
+   * @param creator - Stellar address of the creator.
+   * @param options - Optional pagination options (cursor, limit). Default page size is 20.
+   * @returns A page of invoice IDs with a nextCursor for subsequent pages.
    */
-  private async getInvoicesByCreator(creator: string): Promise<Invoice[]> {
+  async getInvoicesByCreator(
+    creator: string,
+    options: PaginationOptions = {}
+  ): Promise<PaginatedResult<string>> {
+    const limit = options.limit ?? 20;
+
     const operation = this.contract.call(
       "get_invoices_by_creator",
       nativeToScVal(creator, { type: "address" })
@@ -469,12 +483,19 @@ export class StellarSplitClient {
     const returnVal = (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval;
     if (!returnVal) throw new Error("No return value from get_invoices_by_creator");
 
-    const invoices = scValToNative(returnVal);
-    if (!Array.isArray(invoices)) return [];
+    const raw = scValToNative(returnVal);
+    const allIds: string[] = Array.isArray(raw)
+      ? raw.map((id: unknown) => String(id))
+      : [];
 
-    return invoices.map((inv: Record<string, unknown>, idx: number) =>
-      this._parseInvoice(idx.toString(), inv)
-    );
+    const total = allIds.length;
+    const startIndex = options.cursor
+      ? allIds.indexOf(options.cursor) + 1
+      : 0;
+    const page = allIds.slice(startIndex, startIndex + limit);
+    const nextCursor = startIndex + limit < total ? page[page.length - 1] : null;
+
+    return { items: page, nextCursor, total };
   }
 
   /**
