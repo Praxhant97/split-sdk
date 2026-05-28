@@ -35,6 +35,8 @@ export interface Invoice {
   status: InvoiceStatus;
   /** All payments recorded on-chain. */
   payments: Payment[];
+  /** Whether this is a recurring invoice. */
+  recurring?: boolean;
 }
 
 /** Parameters for creating an invoice. */
@@ -59,24 +61,12 @@ export interface PayParams {
   amount: bigint;
 }
 
-/** RPC endpoint health status. */
-export interface RPCHealth {
-  /** Health status: 'ok', 'degraded', or 'down'. */
-  status: "ok" | "degraded" | "down";
-  /** Round-trip latency in milliseconds. */
-  latencyMs: number;
-  /** Latest ledger block height. */
-  blockHeight: number;
-  /** Timestamp when health was checked. */
-  timestamp: number;
-}
-
-/** Contract upgrade event. */
-export interface UpgradeEvent {
-  /** Previous WASM hash. */
-  previousHash: string;
-  /** New WASM hash. */
-  newHash: string;
-  /** Timestamp when upgrade was detected. */
-  detectedAt: number;
+/** An invoice template for reuse. */
+export interface InvoiceTemplate {
+  /** Template name. */
+  name: string;
+  /** Recipients and their owed amounts. */
+  recipients: Recipient[];
+  /** USDC token contract address. */
+  token: string;
 }

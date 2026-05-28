@@ -22,6 +22,10 @@ export {
   truncateAddress,
 } from "./utils.js";
 
+export { pollUSDCBalance, initPoller } from "./poller.js";
+
+export { telemetry } from "./telemetry.js";
+
 export type {
   Invoice,
   Payment,
@@ -29,6 +33,5 @@ export type {
   InvoiceStatus,
   CreateInvoiceParams,
   PayParams,
-  RPCHealth,
-  UpgradeEvent,
+  InvoiceTemplate,
 } from "./types.js";
