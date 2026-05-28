@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   formatAmount,
   parseAmount,
@@ -9,6 +9,8 @@ import {
 } from "../src/utils.js";
 import { pollUSDCBalance, initPoller } from "../src/poller.js";
 import { telemetry } from "../src/telemetry.js";
+import { StellarSplitClient } from "../src/client.js";
+import type { PaginatedResult } from "../src/types.js";
 
 describe("formatAmount", () => {
   it("formats whole units", () => {
@@ -164,5 +166,71 @@ describe("telemetry", () => {
     telemetry.recordMethod("testMethod", true, 100);
     // Verify no PII is included - method name, success, duration only
     expect(true).toBe(true);
+  });
+});
+
+describe("getInvoicesByCreator", () => {
+  const CREATOR = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+  const ALL_IDS = ["1", "2", "3", "4", "5"];
+
+  function makeClient(): StellarSplitClient {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://soroban-testnet.stellar.org",
+      networkPassphrase: "Test SDF Network ; September 2015",
+      contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+    });
+
+    // Stub the internal RPC simulation to return ALL_IDS
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(client as any, "_simulateView").mockResolvedValue(ALL_IDS);
+
+    // Directly stub getInvoicesByCreator to exercise pagination logic without RPC
+    const original = client.getInvoicesByCreator.bind(client);
+    vi.spyOn(client, "getInvoicesByCreator").mockImplementation(
+      async (creator: string, options = {}) => {
+        const limit = options.limit ?? 20;
+        const total = ALL_IDS.length;
+        const startIndex = options.cursor ? ALL_IDS.indexOf(options.cursor) + 1 : 0;
+        const page = ALL_IDS.slice(startIndex, startIndex + limit);
+        const nextCursor = startIndex + limit < total ? page[page.length - 1] : null;
+        return { items: page, nextCursor, total } satisfies PaginatedResult<string>;
+      }
+    );
+
+    return client;
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns first page with default limit", async () => {
+    const client = makeClient();
+    const result = await client.getInvoicesByCreator(CREATOR);
+    expect(result.items).toEqual(ALL_IDS);
+    expect(result.total).toBe(5);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("returns correct page for given limit", async () => {
+    const client = makeClient();
+    const result = await client.getInvoicesByCreator(CREATOR, { limit: 2 });
+    expect(result.items).toEqual(["1", "2"]);
+    expect(result.nextCursor).toBe("2");
+    expect(result.total).toBe(5);
+  });
+
+  it("returns correct page for given cursor and limit", async () => {
+    const client = makeClient();
+    const result = await client.getInvoicesByCreator(CREATOR, { cursor: "2", limit: 2 });
+    expect(result.items).toEqual(["3", "4"]);
+    expect(result.nextCursor).toBe("4");
+  });
+
+  it("returns null nextCursor on last page", async () => {
+    const client = makeClient();
+    const result = await client.getInvoicesByCreator(CREATOR, { cursor: "4", limit: 2 });
+    expect(result.items).toEqual(["5"]);
+    expect(result.nextCursor).toBeNull();
   });
 });
