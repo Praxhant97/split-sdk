@@ -35,6 +35,8 @@ export interface Invoice {
   status: InvoiceStatus;
   /** All payments recorded on-chain. */
   payments: Payment[];
+  /** Whether this is a recurring invoice. */
+  recurring?: boolean;
 }
 
 /** Parameters for creating an invoice. */
@@ -57,4 +59,14 @@ export interface PayParams {
   invoiceId: string;
   /** Amount to pay in stroops. */
   amount: bigint;
+}
+
+/** An invoice template for reuse. */
+export interface InvoiceTemplate {
+  /** Template name. */
+  name: string;
+  /** Recipients and their owed amounts. */
+  recipients: Recipient[];
+  /** USDC token contract address. */
+  token: string;
 }
