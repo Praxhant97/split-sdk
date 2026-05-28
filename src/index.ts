@@ -5,6 +5,8 @@
 export { StellarSplitClient } from "./client.js";
 export type { StellarSplitClientConfig, NetworkConfig, TxResult } from "./client.js";
 
+export { Deduplicator } from "./dedup.js";
+
 export { TxQueue } from "./queue.js";
 
 export { exportInvoice } from "./export.js";

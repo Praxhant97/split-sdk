@@ -17,6 +17,7 @@ import {
 import { signTransaction } from "./wallet.js";
 import { telemetry } from "./telemetry.js";
 import { checkRPCHealth } from "./health.js";
+import { Deduplicator } from "./dedup.js";
 import type {
   ApprovalResult,
   CreateInvoiceParams,
@@ -93,6 +94,7 @@ export class StellarSplitClient {
   private contract: Contract;
   private config: StellarSplitClientConfig;
   private _plugins = new Set<string>();
+  private _dedup = new Deduplicator<Invoice>();
 
   constructor(config: StellarSplitClientConfig) {
     this.config = config;
@@ -249,6 +251,10 @@ export class StellarSplitClient {
    * Fetch an invoice by ID.
    */
   async getInvoice(invoiceId: string): Promise<Invoice> {
+    return this._dedup.dedupe(invoiceId, () => this._fetchInvoice(invoiceId));
+  }
+
+  private async _fetchInvoice(invoiceId: string): Promise<Invoice> {
     const startTime = Date.now();
     try {
       const operation = this.contract.call(
