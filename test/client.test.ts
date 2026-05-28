@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { Keypair, StrKey } from "@stellar/stellar-sdk";
 import {
   formatAmount,
   parseAmount,
@@ -10,6 +11,10 @@ import {
 import { pollUSDCBalance, initPoller } from "../src/poller.js";
 import { telemetry } from "../src/telemetry.js";
 import { StellarSplitClient } from "../src/client.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("formatAmount", () => {
   it("formats whole units", () => {
@@ -99,6 +104,76 @@ describe("truncateAddress", () => {
     const addr = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
     const result = truncateAddress(addr, 6);
     expect(result).toBe("GAAZI4...KOCCWN");
+  });
+});
+
+describe("generateReceipt", () => {
+  it("generates a receipt for a released invoice", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    const releasedInvoice = {
+      id: "123",
+      creator: "GCREATORXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      recipients: [
+        {
+          address: "GRECIPIENTXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+          amount: 5_000_000n,
+        },
+      ],
+      token: "GUSDCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      deadline: 1_700_000_000,
+      funded: 5_000_000n,
+      status: "Released" as const,
+      payments: [
+        {
+          payer: "GPAYERXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+          amount: 5_000_000n,
+        },
+      ],
+    };
+
+    vi.spyOn(client, "getInvoice").mockResolvedValue(releasedInvoice as any);
+
+    const receipt = await client.generateReceipt("123");
+
+    expect(receipt.invoiceId).toBe("123");
+    expect(receipt.creator).toBe(releasedInvoice.creator);
+    expect(receipt.recipients).toEqual(releasedInvoice.recipients);
+    expect(receipt.payments).toEqual(releasedInvoice.payments);
+    expect(receipt.totalAmount).toBe(5_000_000n);
+    expect(typeof receipt.receiptId).toBe("string");
+    expect(receipt.receiptId.length).toBe(64);
+    expect(receipt.releasedAt).toBeGreaterThan(0);
+
+    const secondReceipt = await client.generateReceipt("123");
+    expect(secondReceipt.receiptId).toBe(receipt.receiptId);
+  });
+
+  it("throws when invoice is not released", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    vi.spyOn(client, "getInvoice").mockResolvedValue({
+      id: "123",
+      creator: "GCREATORXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      recipients: [],
+      token: "GUSDCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      deadline: 1_700_000_000,
+      funded: 0n,
+      status: "Pending" as const,
+      payments: [],
+    } as any);
+
+    await expect(client.generateReceipt("123")).rejects.toThrow(
+      "Invoice must be Released to generate a receipt"
+    );
   });
 });
 
