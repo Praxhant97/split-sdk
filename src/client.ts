@@ -32,6 +32,14 @@ import type {
   RPCHealth,
 } from "./types.js";
 
+/** A plugin that extends StellarSplitClient with new methods at runtime. */
+export interface StellarSplitPlugin {
+  /** Unique plugin name — duplicate registrations throw. */
+  name: string;
+  /** Called with the client instance; attach new methods here. */
+  install(client: StellarSplitClient): void;
+}
+
 /** Configuration for StellarSplitClient. */
 export interface StellarSplitClientConfig {
   /** Soroban RPC endpoint URL. */
@@ -84,6 +92,7 @@ export class StellarSplitClient {
   private server: SorobanRpc.Server;
   private contract: Contract;
   private config: StellarSplitClientConfig;
+  private _plugins = new Set<string>();
 
   constructor(config: StellarSplitClientConfig) {
     this.config = config;
@@ -95,6 +104,22 @@ export class StellarSplitClient {
     if (config.telemetry) {
       telemetry.init(config.telemetry);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Plugin system
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Register a plugin that extends this client instance.
+   * Throws if a plugin with the same name has already been registered.
+   */
+  registerPlugin(plugin: StellarSplitPlugin): void {
+    if (this._plugins.has(plugin.name)) {
+      throw new Error(`Plugin "${plugin.name}" is already registered.`);
+    }
+    this._plugins.add(plugin.name);
+    plugin.install(this);
   }
 
   // ---------------------------------------------------------------------------
