@@ -61,6 +61,14 @@ export interface PayParams {
   amount: bigint;
 }
 
+/** Result of a USDC approval check/submission. */
+export interface ApprovalResult {
+  /** Whether the allowance was already sufficient (no tx) or approval was submitted. */
+  approved: boolean;
+  /** Transaction hash, present only when an approval tx was submitted. */
+  txHash?: string;
+}
+
 /** An invoice template for reuse. */
 export interface InvoiceTemplate {
   /** Template name. */

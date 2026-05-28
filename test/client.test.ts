@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   formatAmount,
   parseAmount,
@@ -9,6 +9,7 @@ import {
 } from "../src/utils.js";
 import { pollUSDCBalance, initPoller } from "../src/poller.js";
 import { telemetry } from "../src/telemetry.js";
+import { StellarSplitClient } from "../src/client.js";
 
 describe("formatAmount", () => {
   it("formats whole units", () => {
@@ -164,5 +165,79 @@ describe("telemetry", () => {
     telemetry.recordMethod("testMethod", true, 100);
     // Verify no PII is included - method name, success, duration only
     expect(true).toBe(true);
+  });
+});
+
+describe("checkAndApproveUSDC", () => {
+  const PAYER = "GAYLZFS6SMRJ7JI765CHM7UOIJPD4EIYZMPACBM4K7IGAOF4BISQY6EZ";
+  const TOKEN = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+  const CONTRACT = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+  const AMOUNT = 100_000_000n; // 10 USDC
+
+  function makeClient() {
+    return new StellarSplitClient({
+      rpcUrl: "https://soroban-testnet.stellar.org",
+      networkPassphrase: "Test SDF Network ; September 2015",
+      contractId: CONTRACT,
+    });
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns { approved: true } without txHash when allowance is sufficient", async () => {
+    const { nativeToScVal } = await import("@stellar/stellar-sdk");
+    const client = makeClient();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn((client as any).server, "getAccount").mockResolvedValue({
+      accountId: () => PAYER,
+      sequenceNumber: () => "0",
+      incrementSequenceNumber: () => {},
+    });
+
+    // Return a real i128 ScVal equal to AMOUNT (sufficient allowance)
+    const allowanceRetval = nativeToScVal(AMOUNT, { type: "i128" });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn((client as any).server, "simulateTransaction").mockResolvedValue({
+      result: { retval: allowanceRetval },
+    });
+
+    const result = await client.checkAndApproveUSDC(PAYER, TOKEN, AMOUNT);
+
+    expect(result).toEqual({ approved: true });
+    expect(result.txHash).toBeUndefined();
+  });
+
+  it("submits approval tx and returns txHash when allowance is insufficient", async () => {
+    const { nativeToScVal, xdr } = await import("@stellar/stellar-sdk");
+    const client = makeClient();
+    const MOCK_TX_HASH = "abc123txhash";
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn((client as any).server, "getAccount").mockResolvedValue({
+      accountId: () => PAYER,
+      sequenceNumber: () => "0",
+      incrementSequenceNumber: () => {},
+    });
+
+    // Return 0 allowance (insufficient)
+    const zeroAllowance = nativeToScVal(0n, { type: "i128" });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn((client as any).server, "simulateTransaction").mockResolvedValue({
+      result: { retval: zeroAllowance },
+    });
+
+    // Mock _submitTx to return a fake txHash
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(client as any, "_submitTx").mockResolvedValue({
+      txHash: MOCK_TX_HASH,
+      returnValue: xdr.ScVal.scvVoid(),
+    });
+
+    const result = await client.checkAndApproveUSDC(PAYER, TOKEN, AMOUNT);
+
+    expect(result).toEqual({ approved: true, txHash: MOCK_TX_HASH });
   });
 });

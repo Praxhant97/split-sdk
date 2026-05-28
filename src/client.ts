@@ -5,6 +5,7 @@
  */
 
 import {
+  Address,
   Contract,
   rpc as SorobanRpc,
   TransactionBuilder,
@@ -16,6 +17,7 @@ import {
 import { signTransaction } from "./wallet.js";
 import { telemetry } from "./telemetry.js";
 import type {
+  ApprovalResult,
   CreateInvoiceParams,
   Invoice,
   InvoiceStatus,
@@ -124,6 +126,64 @@ export class StellarSplitClient {
       telemetry.recordMethod("pay", false, Date.now() - startTime);
       throw error;
     }
+  }
+
+  /**
+   * Check the payer's USDC allowance for the contract and submit an approve
+   * transaction if the allowance is insufficient.
+   *
+   * @param payer   - Stellar address of the payer.
+   * @param tokenId - USDC SAC contract address.
+   * @param amount  - Required allowance in stroops.
+   * @returns `{ approved: true }` when allowance is already sufficient, or
+   *          `{ approved: true, txHash }` after submitting an approval tx.
+   */
+  async checkAndApproveUSDC(
+    payer: string,
+    tokenId: string,
+    amount: bigint
+  ): Promise<ApprovalResult> {
+    const tokenContract = new Contract(tokenId);
+
+    // Simulate allowance(payer, contractId) on the token SAC
+    const allowanceOp = tokenContract.call(
+      "allowance",
+      new Address(payer).toScVal(),
+      nativeToScVal(this.config.contractId, { type: "address" })
+    );
+
+    const account = await this.server.getAccount(payer);
+    const simTx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: this.config.networkPassphrase,
+    })
+      .addOperation(allowanceOp)
+      .setTimeout(30)
+      .build();
+
+    const simResult = await this.server.simulateTransaction(simTx);
+    if (SorobanRpc.Api.isSimulationError(simResult)) {
+      throw new Error(`Allowance simulation failed: ${simResult.error}`);
+    }
+
+    const retval = (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+    const allowance: bigint = retval ? BigInt(scValToNative(retval) as string | number) : 0n;
+
+    if (allowance >= amount) {
+      return { approved: true };
+    }
+
+    // Submit approve(payer, contractId, amount)
+    const approveOp = tokenContract.call(
+      "approve",
+      new Address(payer).toScVal(),
+      nativeToScVal(this.config.contractId, { type: "address" }),
+      nativeToScVal(amount, { type: "i128" }),
+      nativeToScVal(0, { type: "u32" }) // expiration_ledger: 0 means no expiry
+    );
+
+    const result = await this._submitTx(payer, approveOp);
+    return { approved: true, txHash: result.txHash };
   }
 
   /**
