@@ -13,6 +13,12 @@ export { replayEvents } from "./events.js";
 
 export { connectWallet, getPublicKey, signTransaction } from "./wallet.js";
 
+export { checkRPCHealth } from "./health.js";
+
+export { getOptimisticInvoice } from "./optimistic.js";
+
+export { watchContractUpgrade } from "./upgrade.js";
+
 export {
   formatAmount,
   parseAmount,
@@ -22,6 +28,10 @@ export {
   truncateAddress,
 } from "./utils.js";
 
+export { pollUSDCBalance, initPoller } from "./poller.js";
+
+export { telemetry } from "./telemetry.js";
+
 export type {
   Invoice,
   Payment,
@@ -29,7 +39,5 @@ export type {
   InvoiceStatus,
   CreateInvoiceParams,
   PayParams,
-  ExportFormat,
-  ContractEvent,
-  ContractEventType,
+  InvoiceTemplate,
 } from "./types.js";

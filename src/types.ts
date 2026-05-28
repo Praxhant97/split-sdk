@@ -35,6 +35,8 @@ export interface Invoice {
   status: InvoiceStatus;
   /** All payments recorded on-chain. */
   payments: Payment[];
+  /** Whether this is a recurring invoice. */
+  recurring?: boolean;
 }
 
 /** Parameters for creating an invoice. */
@@ -59,22 +61,12 @@ export interface PayParams {
   amount: bigint;
 }
 
-/** Export format for invoices. */
-export type ExportFormat = "json" | "csv" | "text";
-
-/** Type of contract event. */
-export type ContractEventType = "created" | "payment" | "released" | "refunded";
-
-/** A Soroban contract event. */
-export interface ContractEvent {
-  /** Event type. */
-  type: ContractEventType;
-  /** Invoice ID associated with the event. */
-  invoiceId: string;
-  /** Event data. */
-  data: unknown;
-  /** Ledger sequence number. */
-  ledger: number;
-  /** Unix timestamp of the event. */
-  timestamp: number;
+/** An invoice template for reuse. */
+export interface InvoiceTemplate {
+  /** Template name. */
+  name: string;
+  /** Recipients and their owed amounts. */
+  recipients: Recipient[];
+  /** USDC token contract address. */
+  token: string;
 }
