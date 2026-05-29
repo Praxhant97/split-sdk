@@ -34,6 +34,9 @@ export { pollUSDCBalance, initPoller } from "./poller.js";
 
 export { telemetry } from "./telemetry.js";
 
+export { registerWebhook, triggerWebhook } from "./webhook.js";
+export type { WebhookConfig, WebhookEvent } from "./webhook.js";
+
 export type { WalletAdapter } from "./adapters/types.js";
 export { WalletConnectAdapter } from "./adapters/walletconnect.js";
 export { LedgerAdapter } from "./adapters/ledger.js";
@@ -57,18 +60,19 @@ export { diffInvoice } from "./diff.js";
 
 export { getSDKHealth, resetSDKHealth } from "./healthDashboard.js";
 
-export { indexInvoice, searchInvoices } from "./searchEngine.js";
+export { subscribeToInvoice } from "./stream.js";
 
-export { buildInvoiceGraph } from "./graph.js";
-export type { InvoiceNode, InvoiceGraph } from "./graph.js";
+export {
+  StellarSplitError,
+  InvoiceNotFoundError,
+  InvoiceNotPendingError,
+  DeadlinePassedError,
+  PaymentExceedsRemainingError,
+  InvoiceFrozenError,
+  parseSorobanError,
+} from "./errors.js";
 
-export type { RateLimiterConfig } from "./rateLimiter.js";
-
-export type {
-  DegradedRead,
-  PendingResult,
-  DegradationConfig,
-} from "./degradation.js";
+export { SimpleCache } from "./cache.js";
 
 export type {
   Invoice,
@@ -86,11 +90,11 @@ export type {
   SimulatePayResult,
   InvoiceDiff,
   SDKHealth,
-  ArbiterVote,
-  DisputeResult,
-  RPCHealth,
-  InvoiceGroup,
-  VestingSchedule,
-  UpgradeEvent,
+  BatchPayment,
+  InvoiceEventCallbacks,
+  SimulateCreateInvoiceResult,
+  SimulatePayResult,
+  FeeEstimate,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
+
