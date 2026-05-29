@@ -30,6 +30,7 @@ import { generatePaymentProof } from "./proof.js";
 import type {
   ArchivedInvoice,
   BatchPayment,
+  BatchResolveResult,
   ArbiterVote,
   BatchPayment,
   CreateInvoiceParams,
@@ -57,6 +58,11 @@ import type {
 } from "./types.js";
 import { InvoiceNotFoundError } from "./types.js";
 import { subscribeToInvoice as _subscribeToInvoice } from "./stream.js";
+import { ConnectionPool } from "./connectionPool.js";
+import { snapshotInvoice as _snapshotInvoice } from "./snapshot.js";
+import type { InvoiceSnapshot } from "./snapshot.js";
+import { AuditLogger } from "./auditLogger.js";
+import type { AuditEntry } from "./auditLogger.js";
 import { WarmStandby } from "./standby.js";
 import { computePrediction } from "./predictor.js";
 import type { CompletionPrediction } from "./predictor.js";
@@ -161,6 +167,17 @@ export class StellarSplitClient {
     }
 
     initHealthDashboard(this.server, this._dedup);
+  }
+
+  private _logAudit(method: string, params: Record<string, unknown>, success: boolean, durationMs: number): void {
+    if (!this._auditLogger) return;
+    this._auditLogger.log({
+      timestamp: Date.now(),
+      method,
+      params: this._auditLogger.sanitize(params),
+      success,
+      durationMs,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -285,10 +302,14 @@ export class StellarSplitClient {
 
       const result = await this._submitTx(params.creator, operation);
       const invoiceId = scValToNative(result.returnValue).toString();
-      telemetry.recordMethod("createInvoice", true, Date.now() - startTime);
+      const durationMs = Date.now() - startTime;
+      telemetry.recordMethod("createInvoice", true, durationMs);
+      this._logAudit("createInvoice", { creator: params.creator, token: params.token, deadline: params.deadline }, true, durationMs);
       return { invoiceId, txHash: result.txHash };
     } catch (error) {
-      telemetry.recordMethod("createInvoice", false, Date.now() - startTime);
+      const durationMs = Date.now() - startTime;
+      telemetry.recordMethod("createInvoice", false, durationMs);
+      this._logAudit("createInvoice", { creator: params.creator, token: params.token, deadline: params.deadline }, false, durationMs);
       throw error;
     }
   }
@@ -500,6 +521,38 @@ export class StellarSplitClient {
       telemetry.recordMethod("getPayments", false, Date.now() - startTime);
       throw error;
     }
+  }
+
+  /**
+   * Capture a point-in-time snapshot of an invoice including all payments.
+   *
+   * @param invoiceId - The invoice ID to snapshot.
+   * @returns An immutable, timestamped snapshot object.
+   */
+  async snapshotInvoice(invoiceId: string): Promise<InvoiceSnapshot> {
+    const invoice = await this.getInvoice(invoiceId);
+    return _snapshotInvoice(invoice);
+  }
+
+  /**
+   * Fetch multiple invoices in parallel with per-item error isolation.
+   *
+   * @param ids - Invoice IDs to resolve.
+   * @returns Results in the same order as the input IDs.
+   */
+  async resolveBatch(ids: string[]): Promise<BatchResolveResult[]> {
+    const settled = await Promise.allSettled(ids.map((id) => this.getInvoice(id)));
+    return settled.map((result, i) => {
+      const invoiceId = ids[i]!;
+      if (result.status === "fulfilled") {
+        return { invoiceId, success: true as const, invoice: result.value };
+      }
+      return {
+        invoiceId,
+        success: false as const,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      };
+    });
   }
 
   /**
