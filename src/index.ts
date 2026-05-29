@@ -108,5 +108,7 @@ export type {
   ExpiryCallback,
   PaymentProof,
 } from "./types.js";
+} from "./types.js";
+export type { ComplianceReport } from "./compliance.js";
 export { InvalidTransitionError } from "./types.js";
 
