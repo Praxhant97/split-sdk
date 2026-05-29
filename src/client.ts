@@ -7,6 +7,7 @@
 import {
   Account,
   Contract,
+  Transaction,
   rpc as SorobanRpc,
   TransactionBuilder,
   BASE_FEE,
@@ -23,10 +24,9 @@ import {
   runRequestInterceptors,
   runResponseInterceptors,
 } from "./interceptors.js";
-import { SimpleCache } from "./cache.js";
-import { parseSorobanError } from "./errors.js";
-import { estimateFee as _estimateFee } from "./fee.js";
-import { InvoiceNotFoundError } from "./types.js";
+import { calculateFee } from "./fee.js";
+import { resolveToken } from "./token.js";
+import { generatePaymentProof } from "./proof.js";
 import type {
   ArchivedInvoice,
   BatchPayment,
@@ -34,7 +34,7 @@ import type {
   BatchPayment,
   CreateInvoiceParams,
   DisputeResult,
-  FeeEstimate,
+  FeeBreakdown,
   Invoice,
   InvoiceEventCallbacks,
   InvoiceGroup,
@@ -44,6 +44,7 @@ import type {
   PaginationOptions,
   Payment,
   PayParams,
+  PaymentProof,
   Recipient,
   SimulateCreateInvoiceResult,
   SimulatePayResult,
@@ -52,6 +53,7 @@ import type {
   SimulateCreateInvoiceResult,
   SimulatePayResult,
   WalletAdapter,
+  TokenInfo,
 } from "./types.js";
 import { InvoiceNotFoundError } from "./types.js";
 import { subscribeToInvoice as _subscribeToInvoice } from "./stream.js";
@@ -791,6 +793,36 @@ export class StellarSplitClient {
     return { txHash: result.txHash };
   }
 
+  /**
+   * Calculate the protocol fee for a given amount.
+   *
+   * @param amount - Gross amount in stroops
+   * @returns Fee breakdown with gross, fee, net, and feeBps
+   */
+  async calculateFee(amount: bigint): Promise<FeeBreakdown> {
+    return calculateFee(amount, this.config);
+  }
+
+  /**
+   * Resolve token metadata from a SAC contract address.
+   *
+   * @param address - Token contract address
+   * @returns Token metadata (symbol, name, decimals)
+   */
+  async resolveToken(address: string): Promise<TokenInfo> {
+    return resolveToken(address, this.config);
+  }
+
+  /**
+   * Generate a cryptographic proof of payment.
+   *
+   * @param txHash - Transaction hash
+   * @returns Payment proof with deterministic SHA-256 hash
+   */
+  async generatePaymentProof(txHash: string): Promise<PaymentProof> {
+    return generatePaymentProof(txHash, this.config);
+  }
+
   // ---------------------------------------------------------------------------
   // Issue #1 — batchPay
   // ---------------------------------------------------------------------------
@@ -1178,6 +1210,105 @@ export class StellarSplitClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Issue #94 — co-signer workflow
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build an unsigned transaction XDR for a multi-sig invoice operation.
+   * Each signer in the provided list must independently sign this XDR and
+   * return a CoSignature for use with submitWithCoSignatures.
+   *
+   * @param invoiceId - The invoice requiring multiple signatures.
+   * @param signers   - Stellar addresses of all required co-signers.
+   * @returns Base64-encoded unsigned transaction XDR.
+   */
+  async collectCoSignatures(invoiceId: string, signers: string[]): Promise<string> {
+    if (signers.length === 0) throw new Error("At least one signer required");
+
+    const firstSigner = signers[0]!;
+    const operation = this.contract.call(
+      "release_invoice",
+      nativeToScVal(BigInt(invoiceId), { type: "u64" })
+    );
+
+    const account = await this.server.getAccount(firstSigner);
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: this.config.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(30)
+      .build();
+
+    const simResult = await this.server.simulateTransaction(tx);
+    if (SorobanRpc.Api.isSimulationError(simResult)) {
+      throw new Error(`Simulation failed: ${simResult.error}`);
+    }
+
+    const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
+    return preparedTx.toXDR();
+  }
+
+  /**
+   * Merge all collected co-signatures and submit the combined transaction.
+   *
+   * @param invoiceId  - The invoice being released.
+   * @param signatures - Array of CoSignature objects (one per signer).
+   * @returns The transaction hash.
+   * @throws If fewer signatures are provided than the invoice requires.
+   */
+  async submitWithCoSignatures(invoiceId: string, signatures: CoSignature[]): Promise<TxResult> {
+    const invoice = await this.getInvoice(invoiceId);
+    const requiredCount = invoice.recipients.length;
+
+    if (signatures.length < requiredCount) {
+      throw new Error(
+        `Insufficient signatures: ${signatures.length} provided, ${requiredCount} required`
+      );
+    }
+
+    const firstSig = signatures[0]!;
+    const mergedTx = TransactionBuilder.fromXDR(
+      firstSig.signedXdr,
+      this.config.networkPassphrase
+    ) as Transaction;
+
+    for (let i = 1; i < signatures.length; i++) {
+      const sig = signatures[i]!;
+      const otherTx = TransactionBuilder.fromXDR(
+        sig.signedXdr,
+        this.config.networkPassphrase
+      ) as Transaction;
+      for (const decoratedSig of otherTx.signatures) {
+        mergedTx.addDecoratedSignature(decoratedSig);
+      }
+    }
+
+    const sendResult = await this.server.sendTransaction(mergedTx);
+    if (sendResult.status === "ERROR") {
+      throw new Error(`Transaction failed: ${JSON.stringify(sendResult.errorResult)}`);
+    }
+
+    const txHash = sendResult.hash;
+    let getResult = await this.server.getTransaction(txHash);
+    let attempts = 0;
+    while (
+      getResult.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+      attempts < 20
+    ) {
+      await new Promise((r) => setTimeout(r, 1500));
+      getResult = await this.server.getTransaction(txHash);
+      attempts++;
+    }
+
+    if (getResult.status !== SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      throw new Error(`Transaction not confirmed: ${getResult.status}`);
+    }
+
+    return { txHash };
+  }
+
+  // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
 
@@ -1381,51 +1512,6 @@ export class StellarSplitClient {
       payments,
       recurring: raw.recurring as boolean | undefined,
     };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Issue #91 — Invoice payment predictor
-  // ---------------------------------------------------------------------------
-
-  async predictCompletion(invoiceId: string): Promise<CompletionPrediction> {
-    const invoice = await this.getInvoice(invoiceId);
-    const total = invoice.recipients.reduce((sum, r) => sum + r.amount, 0n);
-    return computePrediction(invoice.payments, total, invoice.funded);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Issue #93 — Invoice archival client
-  // ---------------------------------------------------------------------------
-
-  async archiveInvoice(invoiceId: string): Promise<TxResult> {
-    const operation = this.contract.call(
-      "archive_invoice",
-      nativeToScVal(BigInt(invoiceId), { type: "u64" })
-    );
-    const result = await this._submitTx(this.config.contractId, operation);
-    return { txHash: result.txHash };
-  }
-
-  async restoreInvoice(invoiceId: string): Promise<TxResult> {
-    const operation = this.contract.call(
-      "restore_invoice",
-      nativeToScVal(BigInt(invoiceId), { type: "u64" })
-    );
-    const result = await this._submitTx(this.config.contractId, operation);
-    return { txHash: result.txHash };
-  }
-
-  async listArchived(address: string): Promise<ArchivedInvoice[]> {
-    const operation = this.contract.call(
-      "get_archived_invoices",
-      nativeToScVal(address, { type: "address" })
-    );
-    const raw = await this._simulateView(operation);
-    if (!Array.isArray(raw)) return [];
-    return (raw as Record<string, unknown>[]).map((item) => ({
-      invoiceId: String(item["invoice_id"] ?? item["invoiceId"] ?? ""),
-      archivedAt: Number(item["archived_at"] ?? item["archivedAt"] ?? 0),
-    }));
   }
 
 }
