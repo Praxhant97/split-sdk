@@ -34,6 +34,9 @@ export { pollUSDCBalance, initPoller } from "./poller.js";
 
 export { telemetry } from "./telemetry.js";
 
+export { registerWebhook, triggerWebhook } from "./webhook.js";
+export type { WebhookConfig, WebhookEvent } from "./webhook.js";
+
 export type { WalletAdapter } from "./adapters/types.js";
 export { WalletConnectAdapter } from "./adapters/walletconnect.js";
 export { LedgerAdapter } from "./adapters/ledger.js";
@@ -52,6 +55,20 @@ export { diffInvoice } from "./diff.js";
 
 export { getSDKHealth, resetSDKHealth } from "./healthDashboard.js";
 
+export { subscribeToInvoice } from "./stream.js";
+
+export {
+  StellarSplitError,
+  InvoiceNotFoundError,
+  InvoiceNotPendingError,
+  DeadlinePassedError,
+  PaymentExceedsRemainingError,
+  InvoiceFrozenError,
+  parseSorobanError,
+} from "./errors.js";
+
+export { SimpleCache } from "./cache.js";
+
 export type {
   Invoice,
   Payment,
@@ -68,20 +85,11 @@ export type {
   SimulatePayResult,
   InvoiceDiff,
   SDKHealth,
-  CoSignature,
-  RevenueBreakdown,
-  RPCNode,
+  BatchPayment,
+  InvoiceEventCallbacks,
+  SimulateCreateInvoiceResult,
+  SimulatePayResult,
+  FeeEstimate,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
-// Issue #94 — co-signer workflow (methods live on StellarSplitClient)
-
-// Issue #95 — backwards-compatibility shim
-export { createCompatClient } from "./compat.js";
-export type { CompatClient } from "./compat.js";
-
-// Issue #96 — invoice revenue calculator
-export { calculateRevenue, calculateFee } from "./revenue.js";
-
-// Issue #97 — network topology mapper
-export { discoverRPCNodes } from "./topology.js";

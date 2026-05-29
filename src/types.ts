@@ -222,26 +222,10 @@ export interface SimulatePayResult {
   fee: string;
 }
 
-/** A single co-signer's contribution to a multi-sig invoice transaction. */
-export interface CoSignature {
-  /** Stellar address of the signer. */
-  signer: string;
-  /** Base64-encoded signed transaction XDR from this signer. */
-  signedXdr: string;
-}
-
-/** Breakdown of revenue for an invoice after protocol fees. */
-export interface RevenueBreakdown {
-  invoiceId: string;
-  gross: bigint;
-  protocolFee: bigint;
-  net: bigint;
-  perRecipient: Array<{ address: string; amount: bigint }>;
-}
-
-/** A discovered Stellar RPC node with health and latency info. */
-export interface RPCNode {
-  url: string;
-  latencyMs: number;
-  healthy: boolean;
+/** Fee estimate returned by estimateFee(). */
+export interface FeeEstimate {
+  /** Estimated transaction fee in stroops. */
+  fee: bigint;
+  /** Network congestion level derived from recent fee statistics. */
+  congestion: "low" | "medium" | "high";
 }
