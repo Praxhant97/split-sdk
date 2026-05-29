@@ -21,6 +21,14 @@ export { getOptimisticInvoice } from "./optimistic.js";
 
 export { watchContractUpgrade } from "./upgrade.js";
 
+export { calculateFee } from "./fee.js";
+
+export { resolveToken } from "./token.js";
+
+export { watchExpiry } from "./watcher.js";
+
+export { generatePaymentProof } from "./proof.js";
+
 export {
   formatAmount,
   parseAmount,
@@ -49,7 +57,12 @@ export {
   addRequestInterceptor,
   addResponseInterceptor,
 } from "./interceptors.js";
-export type { RequestInterceptor, ResponseInterceptor, RPCRequest, RPCResponse } from "./interceptors.js";
+export type {
+  RequestInterceptor,
+  ResponseInterceptor,
+  RPCRequest,
+  RPCResponse,
+} from "./interceptors.js";
 
 export { diffInvoice } from "./diff.js";
 
@@ -85,11 +98,11 @@ export type {
   SimulatePayResult,
   InvoiceDiff,
   SDKHealth,
-  BatchPayment,
-  InvoiceEventCallbacks,
-  SimulateCreateInvoiceResult,
-  SimulatePayResult,
-  FeeEstimate,
+  FeeBreakdown,
+  TokenInfo,
+  ExpiryEvent,
+  ExpiryCallback,
+  PaymentProof,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
