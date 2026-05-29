@@ -4,8 +4,6 @@
 
 export { StellarSplitClient } from "./client.js";
 export type { StellarSplitClientConfig, NetworkConfig, TxResult } from "./client.js";
-// Dispute management methods (for clarity, these are instance methods on StellarSplitClient)
-// Types exported below
 
 export { Deduplicator } from "./dedup.js";
 
@@ -68,10 +66,22 @@ export type {
   InvoiceEventCallbacks,
   SimulateCreateInvoiceResult,
   SimulatePayResult,
-} from "./types.js";
   InvoiceDiff,
   SDKHealth,
+  CoSignature,
+  RevenueBreakdown,
+  RPCNode,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
-export { LedgerAdapter } from "./adapters/ledger.js";
+// Issue #94 — co-signer workflow (methods live on StellarSplitClient)
+
+// Issue #95 — backwards-compatibility shim
+export { createCompatClient } from "./compat.js";
+export type { CompatClient } from "./compat.js";
+
+// Issue #96 — invoice revenue calculator
+export { calculateRevenue, calculateFee } from "./revenue.js";
+
+// Issue #97 — network topology mapper
+export { discoverRPCNodes } from "./topology.js";

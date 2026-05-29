@@ -8,6 +8,7 @@ import {
   Account,
   Address,
   Contract,
+  Transaction,
   rpc as SorobanRpc,
   TransactionBuilder,
   BASE_FEE,
@@ -29,6 +30,7 @@ import type {
   ApprovalResult,
   BatchPayment,
   ArbiterVote,
+  CoSignature,
   CreateInvoiceParams,
   DisputeResult,
   Invoice,
@@ -1025,6 +1027,105 @@ export class StellarSplitClient {
     return invoices.map((inv: Record<string, unknown>, idx: number) =>
       this._parseInvoice(idx.toString(), inv)
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Issue #94 — co-signer workflow
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build an unsigned transaction XDR for a multi-sig invoice operation.
+   * Each signer in the provided list must independently sign this XDR and
+   * return a CoSignature for use with submitWithCoSignatures.
+   *
+   * @param invoiceId - The invoice requiring multiple signatures.
+   * @param signers   - Stellar addresses of all required co-signers.
+   * @returns Base64-encoded unsigned transaction XDR.
+   */
+  async collectCoSignatures(invoiceId: string, signers: string[]): Promise<string> {
+    if (signers.length === 0) throw new Error("At least one signer required");
+
+    const firstSigner = signers[0]!;
+    const operation = this.contract.call(
+      "release_invoice",
+      nativeToScVal(BigInt(invoiceId), { type: "u64" })
+    );
+
+    const account = await this.server.getAccount(firstSigner);
+    const tx = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: this.config.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(30)
+      .build();
+
+    const simResult = await this.server.simulateTransaction(tx);
+    if (SorobanRpc.Api.isSimulationError(simResult)) {
+      throw new Error(`Simulation failed: ${simResult.error}`);
+    }
+
+    const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
+    return preparedTx.toXDR();
+  }
+
+  /**
+   * Merge all collected co-signatures and submit the combined transaction.
+   *
+   * @param invoiceId  - The invoice being released.
+   * @param signatures - Array of CoSignature objects (one per signer).
+   * @returns The transaction hash.
+   * @throws If fewer signatures are provided than the invoice requires.
+   */
+  async submitWithCoSignatures(invoiceId: string, signatures: CoSignature[]): Promise<TxResult> {
+    const invoice = await this.getInvoice(invoiceId);
+    const requiredCount = invoice.recipients.length;
+
+    if (signatures.length < requiredCount) {
+      throw new Error(
+        `Insufficient signatures: ${signatures.length} provided, ${requiredCount} required`
+      );
+    }
+
+    const firstSig = signatures[0]!;
+    const mergedTx = TransactionBuilder.fromXDR(
+      firstSig.signedXdr,
+      this.config.networkPassphrase
+    ) as Transaction;
+
+    for (let i = 1; i < signatures.length; i++) {
+      const sig = signatures[i]!;
+      const otherTx = TransactionBuilder.fromXDR(
+        sig.signedXdr,
+        this.config.networkPassphrase
+      ) as Transaction;
+      for (const decoratedSig of otherTx.signatures) {
+        mergedTx.addDecoratedSignature(decoratedSig);
+      }
+    }
+
+    const sendResult = await this.server.sendTransaction(mergedTx);
+    if (sendResult.status === "ERROR") {
+      throw new Error(`Transaction failed: ${JSON.stringify(sendResult.errorResult)}`);
+    }
+
+    const txHash = sendResult.hash;
+    let getResult = await this.server.getTransaction(txHash);
+    let attempts = 0;
+    while (
+      getResult.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND &&
+      attempts < 20
+    ) {
+      await new Promise((r) => setTimeout(r, 1500));
+      getResult = await this.server.getTransaction(txHash);
+      attempts++;
+    }
+
+    if (getResult.status !== SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      throw new Error(`Transaction not confirmed: ${getResult.status}`);
+    }
+
+    return { txHash };
   }
 
   // ---------------------------------------------------------------------------
