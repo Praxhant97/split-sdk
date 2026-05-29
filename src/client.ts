@@ -6,7 +6,6 @@
 
 import {
   Account,
-  Address,
   Contract,
   Transaction,
   rpc as SorobanRpc,
@@ -29,7 +28,7 @@ import { calculateFee } from "./fee.js";
 import { resolveToken } from "./token.js";
 import { generatePaymentProof } from "./proof.js";
 import type {
-  ApprovalResult,
+  ArchivedInvoice,
   BatchPayment,
   ArbiterVote,
   BatchPayment,
@@ -56,15 +55,13 @@ import type {
   WalletAdapter,
   TokenInfo,
 } from "./types.js";
+import { InvoiceNotFoundError } from "./types.js";
 import { subscribeToInvoice as _subscribeToInvoice } from "./stream.js";
-
-/** Thrown when an invoice ID does not exist on-chain. */
-export class InvoiceNotFoundError extends Error {
-  constructor(invoiceId: string) {
-    super(`Invoice not found: ${invoiceId}`);
-    this.name = "InvoiceNotFoundError";
-  }
-}
+import { WarmStandby } from "./standby.js";
+import { computePrediction } from "./predictor.js";
+import type { CompletionPrediction } from "./predictor.js";
+import { PriorityQueue } from "./priorityQueue.js";
+import type { RequestPriority } from "./priorityQueue.js";
 
 /** A plugin that extends StellarSplitClient with new methods at runtime. */
 export interface StellarSplitPlugin {
@@ -76,8 +73,8 @@ export interface StellarSplitPlugin {
 
 /** Configuration for StellarSplitClient. */
 export interface StellarSplitClientConfig {
-  /** Soroban RPC endpoint URL. */
-  rpcUrl: string;
+  /** Soroban RPC endpoint URL. Pass an array to enable warm-standby failover. */
+  rpcUrl: string | string[];
   /** Stellar network passphrase. */
   networkPassphrase: string;
   /** Deployed StellarSplit contract ID. */
@@ -125,18 +122,34 @@ const NETWORKS: Record<string, NetworkConfig> = {
 };
 
 export class StellarSplitClient {
-  private server: SorobanRpc.Server;
+  private _mainServer!: SorobanRpc.Server;
+  private _standby: WarmStandby | null = null;
+  private _queue = new PriorityQueue();
   private contract: Contract;
   private config: StellarSplitClientConfig;
   private _plugins = new Set<string>();
   private _dedup = new Deduplicator<Invoice>();
   private _cache: SimpleCache<Invoice> | null = null;
 
+  private get server(): SorobanRpc.Server {
+    return this._standby?.server ?? this._mainServer;
+  }
+  private set server(s: SorobanRpc.Server) {
+    this._mainServer = s;
+  }
+
   constructor(config: StellarSplitClientConfig) {
     this.config = config;
-    this.server = new SorobanRpc.Server(config.rpcUrl, {
-      allowHttp: config.rpcUrl.startsWith("http://"),
+    const primaryUrl = Array.isArray(config.rpcUrl) ? config.rpcUrl[0]! : config.rpcUrl;
+    this._mainServer = new SorobanRpc.Server(primaryUrl, {
+      allowHttp: primaryUrl.startsWith("http://"),
     });
+
+    if (Array.isArray(config.rpcUrl) && config.rpcUrl.length > 1) {
+      this._standby = new WarmStandby(config.rpcUrl);
+      this._standby.start();
+    }
+
     this.contract = new Contract(config.contractId);
 
     if (config.telemetry) {
@@ -1323,36 +1336,26 @@ export class StellarSplitClient {
     return scValToNative(returnVal);
   }
 
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
-
-  /** Simulate a view-only (read) contract call. */
-  private async _simulateView<T>(operation: xdr.Operation, parseFn: (val: unknown) => T): Promise<T> {
-    const account = await this.server.getAccount(this.config.contractId).catch(() => null);
-    const sourceAccount = account ?? ({ accountId: () => this.config.contractId, sequenceNumber: () => "0", incrementSequenceNumber: () => {} } as { accountId: () => string; sequenceNumber: () => string; incrementSequenceNumber: () => void });
-
-    const tx = new TransactionBuilder(sourceAccount, {
-      fee: BASE_FEE,
-      networkPassphrase: this.config.networkPassphrase,
-    })
-      .addOperation(operation)
-      .setTimeout(30)
-      .build();
-
-    const simResult = await this.server.simulateTransaction(tx);
-    if (SorobanRpc.Api.isSimulationError(simResult)) {
-      throw new Error(`Simulation failed: ${simResult.error}`);
-    }
-
-    const returnVal = (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval;
-    if (!returnVal) throw new Error("No return value from view call");
-
-    return parseFn(scValToNative(returnVal));
+  /** Build, simulate, sign, and submit a transaction — routed through the priority queue. */
+  private _submitTx(
+    sourceAddress: string,
+    operation: xdr.Operation,
+    priority: RequestPriority = "normal"
+  ): Promise<{ txHash: string; returnValue: xdr.ScVal }> {
+    return this._queue.enqueue(priority, async () => {
+      try {
+        return await this._doSubmitTx(sourceAddress, operation);
+      } catch (error) {
+        if (this._standby) {
+          this._standby.failover();
+          return await this._doSubmitTx(sourceAddress, operation);
+        }
+        throw error;
+      }
+    });
   }
 
-  /** Build, simulate, sign, and submit a transaction. */
-  private async _submitTx(
+  private async _doSubmitTx(
     sourceAddress: string,
     operation: xdr.Operation
   ): Promise<{ txHash: string; returnValue: xdr.ScVal }> {
