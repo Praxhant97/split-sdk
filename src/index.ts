@@ -38,6 +38,8 @@ export type { WalletAdapter } from "./adapters/types.js";
 export { WalletConnectAdapter } from "./adapters/walletconnect.js";
 export { LedgerAdapter } from "./adapters/ledger.js";
 
+export { subscribeToInvoice } from "./stream.js";
+
 export { validateTransition } from "./stateMachineValidator.js";
 
 export {
@@ -74,6 +76,11 @@ export type {
   InvoiceTemplate,
   PaginatedResult,
   PaginationOptions,
+  BatchPayment,
+  InvoiceEventCallbacks,
+  SimulateCreateInvoiceResult,
+  SimulatePayResult,
+} from "./types.js";
   InvoiceDiff,
   SDKHealth,
   BatchPayment,
