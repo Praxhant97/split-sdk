@@ -29,6 +29,8 @@ export { watchExpiry } from "./watcher.js";
 
 export { generatePaymentProof } from "./proof.js";
 
+export { StellarSplitTxBuilder } from "./txBuilder.js";
+
 export {
   formatAmount,
   parseAmount,
