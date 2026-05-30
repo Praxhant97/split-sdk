@@ -1,35 +1,34 @@
 # Implementation Summary
 
-## Issue #132 - WalletConnect Adapter
-- ✅ Created branch `feat/issue-132-walletconnect-adapter`
-- ✅ WalletConnect adapter already implemented in `src/adapters/walletconnect.ts`
-- ✅ WalletAdapter interface defined in `src/adapters/types.ts`
-- ✅ Client configuration supports optional adapter in `StellarSplitClientConfig`
-- ✅ Client uses adapter for signing in `_submitTx`, `collectSignatures`, and fee-bump transactions
-- ✅ Added tests in `test/walletconnect.test.ts`
-- ✅ Added integration test in `test/client-adapter.test.ts`
-- ✅ WalletConnect dependency added to `package.json`
+This document summarizes the implementation of the four GitHub issues:
 
-## Issue #131 - Payment Retry Mechanism
-- ✅ Created branch `feat/issue-131-payment-retry`
-- ✅ Retry logic already implemented in `src/retry.ts`
-- ✅ `pay()` method already uses `withRetry` with exponential backoff
-- ✅ Tests already exist in `test/client.test.ts` for retry behavior
+## Issue #122: Build SDK integration test harness
 
-## Issues #127 and #124
-- ✅ Created branches `feat/issue-127-unknown-feature` and `feat/issue-124-unknown-feature`
-- ⚠️ These issues need to be investigated further as they are not documented in the local task files
+- Created `src/testing/harness.ts` with `IntegrationTestHarness` class
+- Added `setup()`, `teardown()`, `createTestInvoice()`, and `fundTestWallet()` methods
+- Updated `src/testing/index.ts` to export the harness
+- Added example test in `test/integration.test.ts`
 
-## Next Steps
-1. Create Pull Requests for each branch
-2. Add appropriate descriptions referencing the GitHub issues
-3. Ensure all tests pass before submitting PRs
-4. Investigate Issues #127 and #124 to understand their requirements
+## Issue #125: Implement invoice merkle client
 
-## Branches Created
-- `feat/issue-132-walletconnect-adapter`
-- `feat/issue-131-payment-retry`
-- `feat/issue-127-unknown-feature`
-- `feat/issue-124-unknown-feature`
+- Created `src/merkle.ts` with `generateMerkleProof()` and `verifyMerkleProof()` functions
+- Added `MerkleProof` interface
+- Updated `src/index.ts` to export merkle functionality
 
-All implementation work is complete for the documented issues.
+## Issue #126: Add SDK connection multiplexer
+
+- Created `src/multiplexer.ts` with `MultiplexedClient` class and `WeightedEndpoint` interface
+- Implemented weighted round-robin load balancing with health-based weight adjustment
+- Updated `src/index.ts` to export multiplexer functionality
+- Updated `src/types.ts` to export `WeightedEndpoint` interface
+
+## Issue #130: Implement SDK request batcher
+
+- Created `src/requestBatcher.ts` with `RequestBatcher` class and `BatcherConfig` interface
+- Implemented time-windowed batching with max size limit
+- Updated `src/index.ts` to export request batcher functionality
+- Added basic tests in `test/requestBatcher.test.ts`
+
+## Verification
+
+All implementations follow TypeScript strict mode with zero `any` types and maintain backward compatibility with existing SDK functionality.
