@@ -141,5 +141,17 @@ export async function generatePaymentProof(
   return m.generatePaymentProof(txHash, config);
 }
 
+// Merkle proof functionality
+export { generateMerkleProof, verifyMerkleProof } from "./merkle.js";
+export type { MerkleProof } from "./merkle.js";
+
+// Connection multiplexer functionality
+export { MultiplexedClient } from "./multiplexer.js";
+export type { WeightedEndpoint } from "./multiplexer.js";
+
+// Request batcher functionality
+export { RequestBatcher } from "./requestBatcher.js";
+export type { BatcherConfig } from "./requestBatcher.js";
+
 export type { ComplianceReport } from "./compliance.js";
 
