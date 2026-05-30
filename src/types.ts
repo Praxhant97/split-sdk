@@ -413,3 +413,13 @@ export interface InvoiceLifecycleHooks {
   /** Called after successful cancel() */
   onCancelled?: (invoice: Invoice) => void;
 }
+
+/**
+ * Weighted endpoint configuration for load balancing.
+ */
+export interface WeightedEndpoint {
+  /** RPC endpoint URL */
+  url: string;
+  /** Weight for this endpoint (higher = more requests) */
+  weight: number;
+}
