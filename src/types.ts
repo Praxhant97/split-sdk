@@ -18,13 +18,6 @@ export interface ApprovalResult {
   reason?: string;
 }
 
-/** Result from calculateVesting. */
-export interface VestingSchedule {
-  cliffDate: number;
-  fullyVestedDate: number;
-  claimableAt: (timestamp: number) => bigint;
-}
-
 /** Parameters for an arbiter's vote on a dispute. */
 export interface ArbiterVote {
   invoiceId: string;
@@ -65,6 +58,16 @@ export interface Payment {
   payer: string;
   /** Amount paid in stroops (1 XLM = 10_000_000 stroops). */
   amount: bigint;
+  /** Unix timestamp in seconds when the payment was made (optional). */
+  timestamp?: number;
+}
+
+/** An archived invoice record. */
+export interface ArchivedInvoice {
+  /** Invoice ID. */
+  invoiceId: string;
+  /** Unix timestamp in seconds when the invoice was archived. */
+  archivedAt: number;
 }
 
 /** A recipient and their owed share. */
@@ -95,6 +98,34 @@ export interface Invoice {
   payments: Payment[];
   /** Whether this is a recurring invoice. */
   recurring?: boolean;
+  /** Optional memo / description attached to the invoice. */
+  memo?: string;
+  /** ID of the source invoice this was cloned from. */
+  clonedFrom?: string;
+  /** ID of the group this invoice belongs to. */
+  groupId?: string;
+  /** Ledger sequence when this invoice was last modified. */
+  lastModifiedLedger?: number;
+  /** IDs of invoices that must be paid before this one. */
+  prerequisites?: string[];
+}
+
+/** Invoice receipt returned after a successful release. */
+export interface InvoiceReceipt {
+  /** Deterministic receipt identifier. */
+  receiptId: string;
+  /** Invoice ID this receipt belongs to. */
+  invoiceId: string;
+  /** Address that created the invoice. */
+  creator: string;
+  /** Ordered list of recipients with their owed amounts. */
+  recipients: Recipient[];
+  /** All payments recorded on-chain. */
+  payments: Payment[];
+  /** Total amount paid in stroops. */
+  totalAmount: bigint;
+  /** Timestamp when the receipt was generated. */
+  releasedAt: number;
 }
 
 /** Parameters for creating an invoice. */
@@ -155,6 +186,24 @@ export interface InvoiceGroup {
   allFunded: boolean;
 }
 
+/** Invoice receipt returned after a successful release. */
+export interface InvoiceReceipt {
+  /** Deterministic receipt identifier. */
+  receiptId: string;
+  /** Invoice ID this receipt belongs to. */
+  invoiceId: string;
+  /** Address that created the invoice. */
+  creator: string;
+  /** Ordered list of recipients with their owed amounts. */
+  recipients: Recipient[];
+  /** All payments recorded on-chain. */
+  payments: Payment[];
+  /** Total amount paid in stroops. */
+  totalAmount: bigint;
+  /** Timestamp when the receipt was generated. */
+  releasedAt: number;
+}
+
 /** An invoice template for reuse. */
 export interface InvoiceTemplate {
   /** Template name. */
@@ -171,16 +220,6 @@ export interface RPCHealth {
   latencyMs: number;
   blockHeight: number;
   timestamp: number;
-}
-
-/** Vesting schedule for an invoice with cliff and drip. */
-export interface VestingSchedule {
-  /** Unix timestamp of the cliff date. */
-  cliffDate: number;
-  /** Unix timestamp when fully vested. */
-  fullyVestedDate: number;
-  /** Returns the claimable amount at a given Unix timestamp. */
-  claimableAt(timestamp: number): bigint;
 }
 
 /** Event emitted when a contract WASM upgrade is detected. */
@@ -227,4 +266,162 @@ export interface VersionInfo {
   contractVersion: string;
   sdkVersion: string;
   compatible: boolean;
+/** Fee breakdown for a payment amount. */
+export interface FeeBreakdown {
+  /** Gross amount before fee deduction. */
+  gross: bigint;
+  /** Protocol fee amount. */
+  fee: bigint;
+  /** Net amount recipient receives. */
+  net: bigint;
+  /** Fee basis points (1 bps = 0.01%). */
+  feeBps: number;
+}
+
+/** Token metadata information. */
+export interface TokenInfo {
+  /** Token contract address. */
+  address: string;
+  /** Token symbol (e.g., "USDC"). */
+  symbol: string;
+  /** Token name (e.g., "USD Coin"). */
+  name: string;
+  /** Number of decimal places. */
+  decimals: number;
+}
+
+/** Event fired when an invoice is expiring or has expired. */
+export interface ExpiryEvent {
+  /** Invoice ID. */
+  invoiceId: string;
+  /** Unix timestamp deadline (seconds). */
+  deadline: number;
+  /** Seconds remaining until deadline. */
+  secondsRemaining: number;
+  /** True if deadline has passed. */
+  expired: boolean;
+}
+
+/** Callback function for expiry events. */
+export type ExpiryCallback = (event: ExpiryEvent) => void;
+
+/** Cryptographic proof of a payment. */
+export interface PaymentProof {
+  /** Transaction hash. */
+  txHash: string;
+  /** Payer's Stellar address. */
+  payer: string;
+  /** Invoice ID. */
+  invoiceId: string;
+  /** Amount paid in stroops. */
+  amount: bigint;
+  /** Ledger sequence number. */
+  ledger: number;
+  /** SHA-256 hash of proof fields. */
+  proofHash: string;
+}
+
+/** Result of resolving a batch of invoices. */
+export interface BatchResolveResult {
+  invoiceId: string;
+  success: boolean;
+  error?: string;
+}
+
+export type BulkResult =
+  | ({ invoiceId: string } & { success: true })
+  | ({ invoiceId: string } & { success: false; error: string });
+
+export interface PaymentValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+/** Result of a sync operation. */
+export interface SyncResult {
+  synced: number;
+  failed: number;
+  errors: string[];
+}
+
+/** Strategy for resolving conflicting invoice states. */
+export type ConflictStrategy = "remote-wins" | "local-wins" | "latest-ledger";
+
+/** Memory usage report from the memory profiler. */
+export interface MemoryReport {
+  cacheEntries: number;
+  listenerCount: number;
+  estimatedKB: number;
+  warnings: string[];
+}
+
+/** Relationships between invoices (clones, groups, prerequisites). */
+export interface InvoiceRelationships {
+  invoiceId: string;
+  clones: string[];
+  groupId: string | null;
+  prerequisites: string[];
+}
+
+/** A discovered Soroban RPC node with latency info. */
+export interface RPCNode {
+  url: string;
+  latencyMs: number;
+  healthy: boolean;
+}
+
+/** Circuit breaker state */
+export type CircuitState = "closed" | "open" | "half-open";
+
+/** Status of a named circuit breaker */
+export interface CircuitBreakerStatus {
+  endpoint: string;
+  state: CircuitState;
+  failureCount: number;
+  lastFailure: number | null;
+}
+
+/** Historical reconstruction of an invoice at a specific time */
+export interface HistoricalInvoice {
+  reconstructedAt: number;
+}
+
+/** Vesting schedule for an invoice with cliff and drip. */
+export interface VestingSchedule {
+  cliffDate: number;
+  fullyVestedDate: number;
+  claimableAt: (timestamp: number) => bigint;
+}
+
+/** Revenue breakdown after protocol fees. */
+export interface RevenueBreakdown {
+  invoiceId: string;
+  gross: bigint;
+  protocolFee: bigint;
+  net: bigint;
+  perRecipient: { address: string; amount: bigint }[];
+}
+
+/** Fee estimate with congestion indicator. */
+export interface FeeEstimate {
+  fee: bigint;
+  congestion: "low" | "medium" | "high";
+}
+
+/** A co-signature collected from one signer. */
+export interface CoSignature {
+  signer: string;
+  signedXdr: string;
+}
+
+/**
+ * Feature detection result indicating which contract features are available.
+ * Each field is true if the deployed contract supports the corresponding method.
+ */
+export interface ContractFeatures {
+  batchPay: boolean;
+  cloneInvoice: boolean;
+  invoiceGroups: boolean;
+  templates: boolean;
+  archival: boolean;
 }

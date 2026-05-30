@@ -1,19 +1,20 @@
 /**
- * @stellar-split/sdk — public API
+ * @stellar-split/sdk — public API (core exports)
  */
+
+import type { Invoice } from "./types.js";
+import type { StellarSplitClientConfig } from "./client.js";
+import type { ExportFormat } from "./export.js";
 
 export { StellarSplitClient } from "./client.js";
 export type { StellarSplitClientConfig, NetworkConfig, TxResult } from "./client.js";
-// Dispute management methods (for clarity, these are instance methods on StellarSplitClient)
-// Types exported below
 
 export { Deduplicator } from "./dedup.js";
 
 export { TxQueue } from "./queue.js";
 
-export { exportInvoice } from "./export.js";
-
 export { replayEvents } from "./events.js";
+export { CircuitBreakerMonitor, defaultCircuitBreakerMonitor } from "./circuitBreakerMonitor.js";
 
 export { connectWallet, getPublicKey, signTransaction } from "./wallet.js";
 
@@ -22,6 +23,14 @@ export { checkRPCHealth } from "./health.js";
 export { getOptimisticInvoice } from "./optimistic.js";
 
 export { watchContractUpgrade } from "./upgrade.js";
+
+export { calculateFee } from "./fee.js";
+
+export { resolveToken } from "./token.js";
+
+export { watchExpiry } from "./watcher.js";
+
+export { StellarSplitTxBuilder } from "./txBuilder.js";
 
 export {
   formatAmount,
@@ -35,6 +44,21 @@ export {
 export { pollUSDCBalance, initPoller } from "./poller.js";
 
 export { telemetry } from "./telemetry.js";
+export { TelemetryCollector } from "./telemetryCollector.js";
+export type { TelemetryReport } from "./telemetryCollector.js";
+export { DIContainer } from "./container.js";
+export type { IRPCClient, ICacheStore, IWalletAdapter } from "./container.js";
+export type { PaymentValidation } from "./paymentValidator.js";
+
+export { generateGraphQLSchema } from "./graphql.js";
+
+export { registerWebhook, triggerWebhook } from "./webhook.js";
+export type { WebhookConfig, WebhookEvent } from "./webhook.js";
+
+export { detectContractFeatures, clearFeatureCache } from "./featureDetection.js";
+
+export { ExportPipeline } from "./exportPipeline.js";
+export type { PipelineStage, PipelineSink } from "./exportPipeline.js";
 
 export type { WalletAdapter } from "./adapters/types.js";
 export { WalletConnectAdapter } from "./adapters/walletconnect.js";
@@ -48,14 +72,36 @@ export {
   addRequestInterceptor,
   addResponseInterceptor,
 } from "./interceptors.js";
-export type { RequestInterceptor, ResponseInterceptor, RPCRequest, RPCResponse } from "./interceptors.js";
+export { createRequestSigningInterceptor } from "./requestSigner.js";
+export type {
+  RequestInterceptor,
+  ResponseInterceptor,
+  RPCRequest,
+  RPCResponse,
+} from "./interceptors.js";
 
 export { diffInvoice } from "./diff.js";
 
 export { getSDKHealth, resetSDKHealth } from "./healthDashboard.js";
 
+export { getInvoiceAtTime } from "./timeMachine.js";
+export { NotificationCenter } from "./notificationCenter.js";
+
+export {
+  StellarSplitError,
+  InvoiceNotFoundError,
+  InvoiceNotPendingError,
+  DeadlinePassedError,
+  PaymentExceedsRemainingError,
+  InvoiceFrozenError,
+  parseSorobanError,
+} from "./errors.js";
+
+export { SimpleCache } from "./cache.js";
+
 export type {
   Invoice,
+  InvoiceReceipt,
   Payment,
   Recipient,
   InvoiceStatus,
@@ -68,9 +114,16 @@ export type {
   InvoiceEventCallbacks,
   SimulateCreateInvoiceResult,
   SimulatePayResult,
-} from "./types.js";
   InvoiceDiff,
   SDKHealth,
+  FeeBreakdown,
+  TokenInfo,
+  ExpiryEvent,
+  ExpiryCallback,
+  PaymentProof,
+  CircuitBreakerStatus,
+  HistoricalInvoice,
+  ContractFeatures,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
@@ -78,3 +131,30 @@ export { LedgerAdapter } from "./adapters/ledger.js";
 
 export { negotiateVersion, SDK_CONTRACT_VERSION } from "./version.js";
 export type { VersionInfo } from "./types.js";
+// ---------------------------------------------------------------------------
+// Lazy factories for heavy modules
+// ---------------------------------------------------------------------------
+
+export async function getExportModule(): Promise<typeof import("./export.js")> {
+  return await import("./export.js");
+}
+
+export async function exportInvoice(invoice: Invoice, format: ExportFormat): Promise<string> {
+  const m = await getExportModule();
+  return m.exportInvoice(invoice, format);
+}
+
+export async function getProofModule(): Promise<typeof import("./proof.js")> {
+  return await import("./proof.js");
+}
+
+export async function generatePaymentProof(
+  txHash: string,
+  config: StellarSplitClientConfig
+): Promise<import("./proof.js").PaymentProof> {
+  const m = await getProofModule();
+  return m.generatePaymentProof(txHash, config);
+}
+
+export type { ComplianceReport } from "./compliance.js";
+
