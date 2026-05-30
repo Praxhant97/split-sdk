@@ -55,6 +55,11 @@ export { generateGraphQLSchema } from "./graphql.js";
 export { registerWebhook, triggerWebhook } from "./webhook.js";
 export type { WebhookConfig, WebhookEvent } from "./webhook.js";
 
+export { detectContractFeatures, clearFeatureCache } from "./featureDetection.js";
+
+export { ExportPipeline } from "./exportPipeline.js";
+export type { PipelineStage, PipelineSink } from "./exportPipeline.js";
+
 export type { WalletAdapter } from "./adapters/types.js";
 export { WalletConnectAdapter } from "./adapters/walletconnect.js";
 export { LedgerAdapter } from "./adapters/ledger.js";
@@ -118,6 +123,7 @@ export type {
   PaymentProof,
   CircuitBreakerStatus,
   HistoricalInvoice,
+  ContractFeatures,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 

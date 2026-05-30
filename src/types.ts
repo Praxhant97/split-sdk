@@ -408,3 +408,15 @@ export interface CoSignature {
   signer: string;
   signedXdr: string;
 }
+
+/**
+ * Feature detection result indicating which contract features are available.
+ * Each field is true if the deployed contract supports the corresponding method.
+ */
+export interface ContractFeatures {
+  batchPay: boolean;
+  cloneInvoice: boolean;
+  invoiceGroups: boolean;
+  templates: boolean;
+  archival: boolean;
+}
