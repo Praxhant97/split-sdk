@@ -356,6 +356,22 @@ export interface RPCNode {
   healthy: boolean;
 }
 
+/** Circuit breaker state */
+export type CircuitState = "closed" | "open" | "half-open";
+
+/** Status of a named circuit breaker */
+export interface CircuitBreakerStatus {
+  endpoint: string;
+  state: CircuitState;
+  failureCount: number;
+  lastFailure: number | null;
+}
+
+/** Historical reconstruction of an invoice at a specific time */
+export interface HistoricalInvoice {
+  reconstructedAt: number;
+}
+
 /** Vesting schedule for an invoice with cliff and drip. */
 export interface VestingSchedule {
   cliffDate: number;

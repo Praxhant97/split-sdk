@@ -14,6 +14,7 @@ export { Deduplicator } from "./dedup.js";
 export { TxQueue } from "./queue.js";
 
 export { replayEvents } from "./events.js";
+export { CircuitBreakerMonitor, defaultCircuitBreakerMonitor } from "./circuitBreakerMonitor.js";
 
 export { connectWallet, getPublicKey, signTransaction } from "./wallet.js";
 
@@ -61,6 +62,7 @@ export {
   addRequestInterceptor,
   addResponseInterceptor,
 } from "./interceptors.js";
+export { createRequestSigningInterceptor } from "./requestSigner.js";
 export type {
   RequestInterceptor,
   ResponseInterceptor,
@@ -71,6 +73,9 @@ export type {
 export { diffInvoice } from "./diff.js";
 
 export { getSDKHealth, resetSDKHealth } from "./healthDashboard.js";
+
+export { getInvoiceAtTime } from "./timeMachine.js";
+export { NotificationCenter } from "./notificationCenter.js";
 
 export {
   StellarSplitError,
@@ -106,6 +111,8 @@ export type {
   ExpiryEvent,
   ExpiryCallback,
   PaymentProof,
+  CircuitBreakerStatus,
+  HistoricalInvoice,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
