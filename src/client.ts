@@ -104,6 +104,8 @@ export interface StellarSplitClientConfig {
   adapter?: WalletAdapter;
   /** Optional in-memory cache configuration. Disabled by default. */
   cache?: { ttlMs: number };
+  /** Optional compliance rules injectable for invoice checks. */
+  complianceRules?: import("./compliance.js").ComplianceRule[];
 }
 
 /** Network configuration. */
@@ -520,6 +522,17 @@ export class StellarSplitClient {
       recordCall(false);
       throw error;
     }
+  }
+
+  /**
+   * Check invoice compliance against built-in and configured rules.
+   * @param invoiceId - Invoice ID to validate
+   */
+  async checkCompliance(invoiceId: string): Promise<import("./compliance.js").ComplianceReport> {
+    const invoice = await this.getInvoice(invoiceId);
+    const { evaluateInvoice, defaultRules } = await import("./compliance.js");
+    const rules = this.config.complianceRules ?? defaultRules();
+    return evaluateInvoice(invoice, rules);
   }
 
   /**
