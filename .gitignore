@@ -1,5 +1,15 @@
 node_modules/
 dist/
+coverage/
+.vitest/
+.nyc_output/
+test-results/
+__snapshots__/
+*.snap
+testsnapshot/
+testSnapshot/
+test-snapshot/
+test-snapshots/
 .env
 .env.local
 *.tsbuildinfo

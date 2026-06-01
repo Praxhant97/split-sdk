@@ -29,11 +29,17 @@ import { checkRPCHealth } from "./health.js";
 import { Deduplicator } from "./dedup.js";
 import { initHealthDashboard, recordCall } from "./healthDashboard.js";
 import {
+  addRequestInterceptor,
+  addResponseInterceptor,
   runRequestInterceptors,
   runResponseInterceptors,
 } from "./interceptors.js";
-import { addRequestInterceptor } from "./interceptors.js";
 import { createRequestSigningInterceptor } from "./requestSigner.js";
+import {
+  createCompressionRequestInterceptor,
+  createCompressionResponseInterceptor,
+} from "./compression.js";
+import type { CompressionConfig } from "./compression.js";
 import { calculateFee } from "./fee.js";
 import { resolveToken } from "./token.js";
 import { generatePaymentProof } from "./proof.js";
@@ -120,6 +126,10 @@ export interface StellarSplitClientConfig {
   complianceRules?: import("./compliance.js").ComplianceRule[];
   /** Optional dependency injection container for RPC, cache, and wallet implementations. */
   container?: DIContainer;
+  /** Optional request/response compression middleware. Disabled by default. */
+  compression?: CompressionConfig;
+  /** Optional invoice lifecycle hooks. */
+  hooks?: InvoiceLifecycleHooks;
 }
 
 /** Network configuration. */
@@ -164,6 +174,7 @@ export class StellarSplitClient {
   private _rateLimiter: RateLimiter | null = null;
   private _rpcClient: IRPCClient | null = null;
   private _adapter: WalletAdapter | null = null;
+  private _hooks: InvoiceLifecycleHooks = {};
 
   private get server(): SorobanRpc.Server {
     return this._rpcClient ?? this._standby?.server ?? this._mainServer;
@@ -264,6 +275,11 @@ export class StellarSplitClient {
 
     if (config.signingKeypair) {
       addRequestInterceptor(createRequestSigningInterceptor(config.signingKeypair));
+    }
+
+    if (config.compression?.enabled) {
+      addRequestInterceptor(createCompressionRequestInterceptor(config.compression));
+      addResponseInterceptor(createCompressionResponseInterceptor(config.compression));
     }
 
     if (config.cache) {

@@ -266,6 +266,17 @@ export interface VersionInfo {
   contractVersion: string;
   sdkVersion: string;
   compatible: boolean;
+}
+
+/** Optional lifecycle hooks fired by StellarSplitClient methods. */
+export interface InvoiceLifecycleHooks {
+  onCreated?: (invoice: Invoice) => void;
+  onPaid?: (invoice: Invoice, payment: Payment) => void;
+  onReleased?: (invoice: Invoice) => void;
+  onRefunded?: (invoice: Invoice) => void;
+  onCancelled?: (invoice: Invoice) => void;
+}
+
 /** Fee breakdown for a payment amount. */
 export interface FeeBreakdown {
   /** Gross amount before fee deduction. */

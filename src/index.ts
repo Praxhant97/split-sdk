@@ -92,6 +92,30 @@ export { getSDKHealth, resetSDKHealth } from "./healthDashboard.js";
 
 export { getInvoiceAtTime } from "./timeMachine.js";
 export { NotificationCenter } from "./notificationCenter.js";
+export {
+  renderTemplate,
+  builtInNotificationTemplates,
+} from "./notificationTemplates.js";
+export type { InvoiceEvent, InvoiceEventType } from "./notificationTemplates.js";
+export { LoadBalancer } from "./loadBalancer.js";
+export type { EndpointState, LoadBalancerOptions } from "./loadBalancer.js";
+export {
+  generateFlowDiagram,
+  registerInvoiceFlowFetcher,
+} from "./flowVisualizer.js";
+export type { InvoiceFlowFetcher } from "./flowVisualizer.js";
+export {
+  compressPayload,
+  decompressPayload,
+  createCompressionRequestInterceptor,
+  createCompressionResponseInterceptor,
+} from "./compression.js";
+export type {
+  CompressionAlgorithm,
+  CompressionConfig,
+  CompressionPayload,
+  CompressedPayload,
+} from "./compression.js";
 
 export {
   StellarSplitError,
