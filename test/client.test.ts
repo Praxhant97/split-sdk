@@ -14,6 +14,8 @@ import { TelemetryCollector } from "../src/telemetryCollector.js";
 import { DIContainer } from "../src/container.js";
 import { StellarSplitClient } from "../src/client.js";
 import { WalletConnectAdapter } from "../src/adapters/walletconnect.js";
+import { buildSchema } from "graphql";
+import { generateGraphQLSchema } from "../src/graphql.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -235,6 +237,95 @@ describe("pay", () => {
     ).rejects.toThrow("DeadlinePassedError");
 
     expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles funded totals against payment records and payment events", async () => {
+    const rpcClient = {
+      getEvents: vi.fn().mockResolvedValue({
+        events: [
+          {
+            topic: ["payment"],
+            value: { invoiceId: "123", payer: "GPAYER123", amount: "10000000" },
+            ledger: 100,
+            createdAt: new Date().toISOString(),
+          },
+          {
+            topic: ["payment"],
+            value: { invoiceId: "123", payer: "GPAYER456", amount: "1000000" },
+            ledger: 101,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    } as any;
+
+    const container = new DIContainer({ rpcClient });
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+      container,
+    });
+
+    vi.spyOn(client, "getInvoice").mockResolvedValue({
+      id: "123",
+      creator: "GCREATORXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      recipients: [],
+      token: "GUSDCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      deadline: 1_700_000_000,
+      funded: 11_000_000n,
+      status: "Pending" as const,
+      payments: [
+        { payer: "GPAYER123", amount: 10_000_000n },
+        { payer: "GPAYER456", amount: 1_000_000n },
+      ],
+    } as any);
+
+    const report = await client.reconcilePayments("123");
+
+    expect(report.invoiceId).toBe("123");
+    expect(report.invoiceFunded).toBe(11_000_000n);
+    expect(report.paymentRecordsTotal).toBe(11_000_000n);
+    expect(report.paymentEventsTotal).toBe(11_000_000n);
+    expect(report.fundedDiscrepancy).toBe(0n);
+    expect(report.recordsMatchEvents).toBe(true);
+    expect(report.consistent).toBe(true);
+    expect(report.paymentEvents).toHaveLength(2);
+    expect(rpcClient.getEvents).toHaveBeenCalled();
+  });
+
+  it("flushes pending operations and closes resources on shutdown", async () => {
+    const rpcClient = { close: vi.fn().mockResolvedValue(undefined) } as any;
+    const cacheStore = {
+      get: vi.fn(),
+      set: vi.fn(),
+      invalidate: vi.fn(),
+      clear: vi.fn(),
+      persist: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const container = new DIContainer({ rpcClient, cacheStore });
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+      container,
+    });
+
+    const pending = (client as any)._queue.enqueue("normal", async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return "done";
+    });
+
+    await client.shutdown();
+
+    await expect(pending).resolves.toBe("done");
+    expect(rpcClient.close).toHaveBeenCalled();
+    expect(cacheStore.persist).toHaveBeenCalled();
+    expect(cacheStore.close).toHaveBeenCalled();
+    await expect((client as any)._queue.enqueue("normal", async () => "ok")).rejects.toThrow(
+      "Queue is shut down"
+    );
   });
 });
 
@@ -605,13 +696,6 @@ describe("TelemetryCollector", () => {
   it("records metrics and computes percentiles", () => {
     const collector = new TelemetryCollector();
 
-    await expect(
-      client.simulatePay({ payer: PAYER_ADDR, invoiceId: "1", amount: 1000n })
-    ).rejects.toThrow("Simulation error");
-  });
-});
-
-import { Deduplicator } from "../src/dedup.js";
     for (let i = 0; i < 10; i++) {
       collector.recordMethod("methodA", i % 3 === 0, i * 10);
     }
@@ -625,9 +709,6 @@ import { Deduplicator } from "../src/dedup.js";
     expect(report.methods.methodA.p95).toBeGreaterThanOrEqual(90);
   });
 });
-
-import { buildSchema } from "graphql";
-import { generateGraphQLSchema } from "../src/graphql.js";
 
 describe("generateGraphQLSchema", () => {
   it("returns a string containing Invoice, Payment, Recipient types", () => {

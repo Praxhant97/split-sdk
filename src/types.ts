@@ -62,6 +62,25 @@ export interface Payment {
   timestamp?: number;
 }
 
+/** A payment event reconstructed from contract event history. */
+export interface PaymentEventRecord extends Payment {
+  /** Ledger sequence when the event was emitted. */
+  ledger: number;
+}
+
+/** Result of reconciling invoice payments with contract events. */
+export interface PaymentReconciliationReport {
+  invoiceId: string;
+  invoice: Invoice;
+  invoiceFunded: bigint;
+  paymentRecordsTotal: bigint;
+  paymentEventsTotal: bigint;
+  fundedDiscrepancy: bigint;
+  recordsMatchEvents: boolean;
+  consistent: boolean;
+  paymentEvents: PaymentEventRecord[];
+}
+
 /** An archived invoice record. */
 export interface ArchivedInvoice {
   /** Invoice ID. */

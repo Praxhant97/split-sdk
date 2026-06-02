@@ -73,9 +73,12 @@ import type {
   WalletAdapter,
   TokenInfo,
   InvoiceLifecycleHooks,
+  PaymentEventRecord,
+  PaymentReconciliationReport,
 } from "./types.js";
 import type { DIContainer, IRPCClient, ICacheStore, IWalletAdapter } from "./container.js";
 import { InvoiceNotFoundError } from "./types.js";
+import { replayEvents } from "./events.js";
 import { subscribeToInvoice as _subscribeToInvoice } from "./stream.js";
 import { ConnectionPool } from "./connectionPool.js";
 import { snapshotInvoice as _snapshotInvoice } from "./snapshot.js";
@@ -662,6 +665,66 @@ export class StellarSplitClient {
   }
 
   /**
+   * Reconcile an invoice's reported funded amount with its payment records and historical payment events.
+   */
+  async reconcilePayments(invoiceId: string): Promise<PaymentReconciliationReport> {
+    const startTime = Date.now();
+    try {
+      const invoice = await this.getInvoice(invoiceId);
+      const events = await replayEvents(this.server, this.config.contractId, 0, Number.MAX_SAFE_INTEGER);
+      const paymentEvents = events
+        .filter((event) => event.invoiceId === invoiceId && event.type === "payment")
+        .map((event) => {
+          const raw = event.data as Record<string, unknown>;
+          const rawAmount = raw.amount;
+          let amount: bigint;
+
+          if (typeof rawAmount === "bigint") {
+            amount = rawAmount;
+          } else if (typeof rawAmount === "number") {
+            amount = BigInt(rawAmount);
+          } else if (typeof rawAmount === "string" && rawAmount !== "") {
+            amount = BigInt(rawAmount);
+          } else {
+            amount = 0n;
+          }
+
+          const payer = typeof raw.payer === "string" ? raw.payer : "";
+          return {
+            payer,
+            amount,
+            timestamp: event.timestamp,
+            ledger: event.ledger,
+          } as PaymentEventRecord;
+        });
+
+      const paymentRecordsTotal = invoice.payments.reduce((sum, payment) => sum + payment.amount, 0n);
+      const paymentEventsTotal = paymentEvents.reduce((sum, event) => sum + event.amount, 0n);
+      const fundedDiscrepancy = invoice.funded - paymentRecordsTotal;
+      const recordsMatchEvents = paymentRecordsTotal === paymentEventsTotal;
+      const consistent = invoice.funded === paymentEventsTotal && recordsMatchEvents;
+
+      const report: PaymentReconciliationReport = {
+        invoiceId,
+        invoice,
+        invoiceFunded: invoice.funded,
+        paymentRecordsTotal,
+        paymentEventsTotal,
+        fundedDiscrepancy,
+        recordsMatchEvents,
+        consistent,
+        paymentEvents,
+      };
+
+      telemetry.recordMethod("reconcilePayments", true, Date.now() - startTime);
+      return report;
+    } catch (error) {
+      telemetry.recordMethod("reconcilePayments", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  /**
    * Generate a typed receipt for a released invoice.
    */
   async generateReceipt(invoiceId: string): Promise<InvoiceReceipt> {
@@ -725,6 +788,29 @@ export class StellarSplitClient {
         error: result.reason instanceof Error ? result.reason.message : String(result.reason),
       };
     });
+  }
+
+  /**
+   * Gracefully shutdown the SDK client, flush pending operations, and close internal resources.
+   */
+  async shutdown(): Promise<void> {
+    try {
+      await this._queue.shutdown();
+    } finally {
+      this._standby?.stop();
+
+      if (this._cache && typeof (this._cache as any).persist === "function") {
+        await (this._cache as any).persist();
+      }
+      if (this._cache && typeof (this._cache as any).close === "function") {
+        await (this._cache as any).close();
+      }
+      if (this._rpcClient && typeof (this._rpcClient as any).close === "function") {
+        await (this._rpcClient as any).close();
+      }
+
+      telemetry.destroy();
+    }
   }
 
   /**
