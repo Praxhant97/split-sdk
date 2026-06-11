@@ -30,7 +30,7 @@ function computeMemoPrefix(memo?: string): string {
     return "";
   }
 
-  const prefix = normalized.split(/\s+/)[0];
+  const prefix = normalized.split(/\s+/)[0] ?? "";
   return prefix;
 }
 
@@ -86,7 +86,7 @@ export function groupInvoicesByPattern(invoices: Invoice[]): InvoiceCluster[] {
   const clusters: InvoiceCluster[] = [];
 
   for (const [bucketKey, items] of buckets.entries()) {
-    const [token, recipientSignature, memoPrefix, recurringString] = bucketKey.split("::");
+    const [token = "", recipientSignature = "", memoPrefix = "", recurringString = ""] = bucketKey.split("::");
     const key: InvoiceGroupingKey = {
       token,
       recipientSignature,
@@ -99,7 +99,7 @@ export function groupInvoicesByPattern(invoices: Invoice[]): InvoiceCluster[] {
 
     for (const item of sortedItems) {
       const placed = bucketClusters.some((cluster) => {
-        const representative = cluster.amounts[0];
+        const representative = cluster.amounts[0] ?? 0n;
         if (amountsWithinTolerance(representative, item.amount)) {
           cluster.invoices.push(item.invoice);
           cluster.amounts.push(item.amount);
