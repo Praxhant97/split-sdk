@@ -23,6 +23,9 @@ import type { ExportFormat } from "./export.js";
 import { computePaymentValidation } from "./paymentValidator.js";
 import type { PaymentValidation } from "./paymentValidator.js";
 import { withRetry } from "./retry.js";
+import { RetryEngine } from "./retryEngine.js";
+import type { RetryConfig } from "./retryEngine.js";
+import { TelemetryCollector } from "./telemetryCollector.js";
 import { isFeatureEnabled } from "./flags.js";
 import type { FeatureFlags } from "./flags.js";
 import { checkRPCHealth } from "./health.js";
@@ -135,6 +138,8 @@ export interface StellarSplitClientConfig {
   compression?: CompressionConfig;
   /** Optional invoice lifecycle hooks. */
   hooks?: InvoiceLifecycleHooks;
+  /** Optional adaptive retry configuration. When provided, replaces legacy maxRetries for pay/cloneInvoice. */
+  retry?: RetryConfig;
 }
 
 /** Network configuration. */
@@ -180,6 +185,7 @@ export class StellarSplitClient {
   private _rpcClient: IRPCClient | null = null;
   private _adapter: WalletAdapter | null = null;
   private _hooks: InvoiceLifecycleHooks = {};
+  private _retryEngine: RetryEngine | null = null;
 
   private get server(): SorobanRpc.Server {
     return this._rpcClient ?? this._standby?.server ?? this._mainServer;
@@ -293,6 +299,10 @@ export class StellarSplitClient {
 
     // Initialize hooks
     this._hooks = config.hooks ?? {};
+
+    if (config.retry) {
+      this._retryEngine = new RetryEngine(config.retry, new TelemetryCollector());
+    }
 
     initHealthDashboard(this.server, this._dedup);
   }
@@ -511,11 +521,10 @@ export class StellarSplitClient {
     let cacheWritten = false;
 
     try {
-      const result = await withRetry(
-        () => this._submitTx(sourceInvoice.creator, operation),
-        this.config.maxRetries ?? 3,
-        1000
-      );
+      const submitFn = () => this._submitTx(sourceInvoice.creator, operation);
+      const result = this._retryEngine
+        ? await this._retryEngine.execute(submitFn, "cloneInvoice")
+        : await withRetry(submitFn, this.config.maxRetries ?? 3, 1000);
 
       newInvoiceId = scValToNative(result.returnValue).toString();
 
@@ -570,11 +579,10 @@ export class StellarSplitClient {
         nativeToScVal(params.amount, { type: "i128" })
       );
 
-      const result = await withRetry(
-        () => this._submitTx(params.payer, operation),
-        this.config.maxRetries ?? 3,
-        1000
-      );
+      const submitFn = () => this._submitTx(params.payer, operation);
+      const result = this._retryEngine
+        ? await this._retryEngine.execute(submitFn, "pay")
+        : await withRetry(submitFn, this.config.maxRetries ?? 3, 1000);
       this._cache?.invalidate(params.invoiceId);
       telemetry.recordMethod("pay", true, Date.now() - startTime);
       return { txHash: result.txHash };
