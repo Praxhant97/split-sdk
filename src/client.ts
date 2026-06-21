@@ -23,17 +23,26 @@ import type { ExportFormat } from "./export.js";
 import { computePaymentValidation } from "./paymentValidator.js";
 import type { PaymentValidation } from "./paymentValidator.js";
 import { withRetry } from "./retry.js";
+import { RetryEngine } from "./retryEngine.js";
+import type { RetryConfig } from "./retryEngine.js";
+import { TelemetryCollector } from "./telemetryCollector.js";
 import { isFeatureEnabled } from "./flags.js";
 import type { FeatureFlags } from "./flags.js";
 import { checkRPCHealth } from "./health.js";
 import { Deduplicator } from "./dedup.js";
 import { initHealthDashboard, recordCall } from "./healthDashboard.js";
 import {
+  addRequestInterceptor,
+  addResponseInterceptor,
   runRequestInterceptors,
   runResponseInterceptors,
 } from "./interceptors.js";
-import { addRequestInterceptor } from "./interceptors.js";
 import { createRequestSigningInterceptor } from "./requestSigner.js";
+import {
+  createCompressionRequestInterceptor,
+  createCompressionResponseInterceptor,
+} from "./compression.js";
+import type { CompressionConfig } from "./compression.js";
 import { calculateFee } from "./fee.js";
 import { resolveToken } from "./token.js";
 import { generatePaymentProof } from "./proof.js";
@@ -43,6 +52,7 @@ import type {
   BatchPayment,
   BatchResolveResult,
   BulkResult,
+  CloneOverrides,
   CoSignature,
   CreateInvoiceParams,
   DisputeResult,
@@ -50,6 +60,7 @@ import type {
   FeeEstimate,
   Invoice,
   InvoiceEventCallbacks,
+  InvoiceExt,
   InvoiceGroup,
   InvoiceReceipt,
   InvoiceStatus,
@@ -67,9 +78,12 @@ import type {
   WalletAdapter,
   TokenInfo,
   InvoiceLifecycleHooks,
+  PaymentEventRecord,
+  PaymentReconciliationReport,
 } from "./types.js";
 import type { DIContainer, IRPCClient, ICacheStore, IWalletAdapter } from "./container.js";
 import { InvoiceNotFoundError } from "./types.js";
+import { replayEvents } from "./events.js";
 import { subscribeToInvoice as _subscribeToInvoice } from "./stream.js";
 import { ConnectionPool } from "./connectionPool.js";
 import { snapshotInvoice as _snapshotInvoice } from "./snapshot.js";
@@ -120,7 +134,12 @@ export interface StellarSplitClientConfig {
   complianceRules?: import("./compliance.js").ComplianceRule[];
   /** Optional dependency injection container for RPC, cache, and wallet implementations. */
   container?: DIContainer;
+  /** Optional request/response compression middleware. Disabled by default. */
+  compression?: CompressionConfig;
+  /** Optional invoice lifecycle hooks. */
   hooks?: InvoiceLifecycleHooks;
+  /** Optional adaptive retry configuration. When provided, replaces legacy maxRetries for pay/cloneInvoice. */
+  retry?: RetryConfig;
 }
 
 /** Network configuration. */
@@ -166,6 +185,7 @@ export class StellarSplitClient {
   private _rpcClient: IRPCClient | null = null;
   private _adapter: WalletAdapter | null = null;
   private _hooks: InvoiceLifecycleHooks = {};
+  private _retryEngine: RetryEngine | null = null;
 
   private get server(): SorobanRpc.Server {
     return this._rpcClient ?? this._standby?.server ?? this._mainServer;
@@ -268,12 +288,21 @@ export class StellarSplitClient {
       addRequestInterceptor(createRequestSigningInterceptor(config.signingKeypair));
     }
 
+    if (config.compression?.enabled) {
+      addRequestInterceptor(createCompressionRequestInterceptor(config.compression));
+      addResponseInterceptor(createCompressionResponseInterceptor(config.compression));
+    }
+
     if (config.cache) {
       this._cache = new SimpleCache<Invoice>(config.cache.ttlMs);
     }
 
     // Initialize hooks
     this._hooks = config.hooks ?? {};
+
+    if (config.retry) {
+      this._retryEngine = new RetryEngine(config.retry, new TelemetryCollector());
+    }
 
     initHealthDashboard(this.server, this._dedup);
   }
@@ -424,33 +453,110 @@ export class StellarSplitClient {
   }
 
   /**
-   * Clone an existing invoice with a new deadline.
+   * Clone an existing invoice with optional overrides.
    *
-   * @param sourceId    - ID of the invoice to clone.
-   * @param creator     - Address of the creator (must sign).
-   * @param newDeadline - Unix timestamp for the new invoice's deadline.
-   * @returns The new invoice ID and transaction hash.
+   * Submits the `clone_invoice` contract call, writes an optimistic local cache
+   * entry for the new invoice, and automatically rolls back the cache entry on
+   * submission failure.
+   *
+   * @param sourceId - ID of the invoice to clone.
+   * @param overrides - Optional overrides for the cloned invoice fields.
+   * @returns The new invoice ID.
    * @throws {InvoiceNotFoundError} If the source invoice does not exist.
    */
   async cloneInvoice(
     sourceId: string,
-    creator: string,
-    newDeadline: number
-  ): Promise<{ invoiceId: string; txHash: string }> {
+    overrides: CloneOverrides = {}
+  ): Promise<string> {
     const startTime = Date.now();
-    try {
-      const operation = this.contract.call(
-        "clone_invoice",
-        nativeToScVal(BigInt(sourceId), { type: "u64" }),
-        nativeToScVal(newDeadline, { type: "u64" })
-      );
+    const sourceInvoice = await this.getInvoice(sourceId);
 
-      const result = await this._submitTx(creator, operation);
-      const invoiceId = scValToNative(result.returnValue).toString();
+    const mapEntries: xdr.ScMapEntry[] = [];
+
+    if (overrides.newDeadline !== undefined) {
+      mapEntries.push(
+        new xdr.ScMapEntry({
+          key: nativeToScVal("new_deadline", { type: "symbol" }) as xdr.ScVal,
+          val: nativeToScVal(overrides.newDeadline, { type: "u64" }) as xdr.ScVal,
+        })
+      );
+    }
+    if (overrides.newAmounts !== undefined) {
+      mapEntries.push(
+        new xdr.ScMapEntry({
+          key: nativeToScVal("new_amounts", { type: "symbol" }) as xdr.ScVal,
+          val: xdr.ScVal.scvVec(
+            overrides.newAmounts.map((a) => nativeToScVal(a, { type: "i128" }))
+          ) as xdr.ScVal,
+        })
+      );
+    }
+    if (overrides.newRecipients !== undefined) {
+      mapEntries.push(
+        new xdr.ScMapEntry({
+          key: nativeToScVal("new_recipients", { type: "symbol" }) as xdr.ScVal,
+          val: xdr.ScVal.scvVec(
+            overrides.newRecipients.map((r) => nativeToScVal(r, { type: "address" }))
+          ) as xdr.ScVal,
+        })
+      );
+    }
+    if (overrides.newOverflowBehavior !== undefined) {
+      mapEntries.push(
+        new xdr.ScMapEntry({
+          key: nativeToScVal("new_overflow_behavior", { type: "symbol" }) as xdr.ScVal,
+          val: nativeToScVal(overrides.newOverflowBehavior, { type: "symbol" }) as xdr.ScVal,
+        })
+      );
+    }
+
+    const args: xdr.ScVal[] = [
+      nativeToScVal(BigInt(sourceId), { type: "u64" }),
+      xdr.ScVal.scvMap(mapEntries),
+    ];
+
+    const operation = this.contract.call("clone_invoice", ...args);
+
+    let newInvoiceId: string | undefined;
+    let cacheWritten = false;
+
+    try {
+      const submitFn = () => this._submitTx(sourceInvoice.creator, operation);
+      const result = this._retryEngine
+        ? await this._retryEngine.execute(submitFn, "cloneInvoice")
+        : await withRetry(submitFn, this.config.maxRetries ?? 3, 1000);
+
+      newInvoiceId = scValToNative(result.returnValue).toString();
+
+      if (this._cache) {
+        const cloneDepth =
+          typeof (sourceInvoice as Record<string, unknown>).cloneDepth === "number"
+            ? ((sourceInvoice as Record<string, unknown>).cloneDepth as number) + 1
+            : 1;
+
+        const optimisticInvoice: Invoice = {
+          ...sourceInvoice,
+          id: newInvoiceId,
+          clonedFrom: sourceId,
+          parentInvoiceId: sourceId,
+          cloneDepth,
+          funded: 0n,
+          payments: [],
+          status: "Pending",
+        };
+        this._cache.set(newInvoiceId, optimisticInvoice);
+        cacheWritten = true;
+      }
+
       telemetry.recordMethod("cloneInvoice", true, Date.now() - startTime);
-      return { invoiceId, txHash: result.txHash };
+      return newInvoiceId;
     } catch (error) {
       telemetry.recordMethod("cloneInvoice", false, Date.now() - startTime);
+
+      if (cacheWritten && newInvoiceId && this._cache) {
+        this._cache.invalidate(newInvoiceId);
+      }
+
       if (error instanceof Error && error.message.includes("not found")) {
         throw new InvoiceNotFoundError(sourceId);
       }
@@ -473,11 +579,10 @@ export class StellarSplitClient {
         nativeToScVal(params.amount, { type: "i128" })
       );
 
-      const result = await withRetry(
-        () => this._submitTx(params.payer, operation),
-        this.config.maxRetries ?? 3,
-        1000
-      );
+      const submitFn = () => this._submitTx(params.payer, operation);
+      const result = this._retryEngine
+        ? await this._retryEngine.execute(submitFn, "pay")
+        : await withRetry(submitFn, this.config.maxRetries ?? 3, 1000);
       this._cache?.invalidate(params.invoiceId);
       telemetry.recordMethod("pay", true, Date.now() - startTime);
       return { txHash: result.txHash };
@@ -648,6 +753,66 @@ export class StellarSplitClient {
   }
 
   /**
+   * Reconcile an invoice's reported funded amount with its payment records and historical payment events.
+   */
+  async reconcilePayments(invoiceId: string): Promise<PaymentReconciliationReport> {
+    const startTime = Date.now();
+    try {
+      const invoice = await this.getInvoice(invoiceId);
+      const events = await replayEvents(this.server, this.config.contractId, 0, Number.MAX_SAFE_INTEGER);
+      const paymentEvents = events
+        .filter((event) => event.invoiceId === invoiceId && event.type === "payment")
+        .map((event) => {
+          const raw = event.data as Record<string, unknown>;
+          const rawAmount = raw.amount;
+          let amount: bigint;
+
+          if (typeof rawAmount === "bigint") {
+            amount = rawAmount;
+          } else if (typeof rawAmount === "number") {
+            amount = BigInt(rawAmount);
+          } else if (typeof rawAmount === "string" && rawAmount !== "") {
+            amount = BigInt(rawAmount);
+          } else {
+            amount = 0n;
+          }
+
+          const payer = typeof raw.payer === "string" ? raw.payer : "";
+          return {
+            payer,
+            amount,
+            timestamp: event.timestamp,
+            ledger: event.ledger,
+          } as PaymentEventRecord;
+        });
+
+      const paymentRecordsTotal = invoice.payments.reduce((sum, payment) => sum + payment.amount, 0n);
+      const paymentEventsTotal = paymentEvents.reduce((sum, event) => sum + event.amount, 0n);
+      const fundedDiscrepancy = invoice.funded - paymentRecordsTotal;
+      const recordsMatchEvents = paymentRecordsTotal === paymentEventsTotal;
+      const consistent = invoice.funded === paymentEventsTotal && recordsMatchEvents;
+
+      const report: PaymentReconciliationReport = {
+        invoiceId,
+        invoice,
+        invoiceFunded: invoice.funded,
+        paymentRecordsTotal,
+        paymentEventsTotal,
+        fundedDiscrepancy,
+        recordsMatchEvents,
+        consistent,
+        paymentEvents,
+      };
+
+      telemetry.recordMethod("reconcilePayments", true, Date.now() - startTime);
+      return report;
+    } catch (error) {
+      telemetry.recordMethod("reconcilePayments", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  /**
    * Generate a typed receipt for a released invoice.
    */
   async generateReceipt(invoiceId: string): Promise<InvoiceReceipt> {
@@ -711,6 +876,29 @@ export class StellarSplitClient {
         error: result.reason instanceof Error ? result.reason.message : String(result.reason),
       };
     });
+  }
+
+  /**
+   * Gracefully shutdown the SDK client, flush pending operations, and close internal resources.
+   */
+  async shutdown(): Promise<void> {
+    try {
+      await this._queue.shutdown();
+    } finally {
+      this._standby?.stop();
+
+      if (this._cache && typeof (this._cache as any).persist === "function") {
+        await (this._cache as any).persist();
+      }
+      if (this._cache && typeof (this._cache as any).close === "function") {
+        await (this._cache as any).close();
+      }
+      if (this._rpcClient && typeof (this._rpcClient as any).close === "function") {
+        await (this._rpcClient as any).close();
+      }
+
+      telemetry.destroy();
+    }
   }
 
   /**
@@ -1822,8 +2010,65 @@ export class StellarSplitClient {
       recurring: raw.recurring as boolean | undefined,
       memo: raw.memo as string | undefined,
       clonedFrom: raw.clonedFrom as string | undefined,
+      parentInvoiceId: raw.parentInvoiceId ? String(raw.parentInvoiceId) : undefined,
+      cloneDepth: typeof raw.cloneDepth === "number" ? raw.cloneDepth : undefined,
       groupId: raw.groupId as string | undefined,
     };
+  }
+
+  /**
+   * Fetch extended invoice metadata (clone chain info) via get_invoice_ext.
+   */
+  private async _getInvoiceExt(invoiceId: string): Promise<InvoiceExt> {
+    const operation = this.contract.call(
+      "get_invoice_ext",
+      nativeToScVal(BigInt(invoiceId), { type: "u64" })
+    );
+
+    const raw = await this._simulateView(operation) as Record<string, unknown>;
+
+    return {
+      parentInvoiceId: raw.parentInvoiceId ? String(raw.parentInvoiceId) : null,
+      cloneDepth: Number(raw.cloneDepth ?? 0),
+    };
+  }
+
+  /**
+   * Resolve the full clone chain for an invoice.
+   *
+   * Recursively fetches parent invoices via `parentInvoiceId` from
+   * `get_invoice_ext` until the root invoice is reached. Returns the chain
+   * ordered from root to leaf.
+   *
+   * @param invoiceId - The leaf invoice ID to resolve the chain from.
+   * @returns An array of invoices ordered root → leaf.
+   * @throws If the clone chain exceeds 10 levels or a cycle is detected.
+   */
+  async resolveCloneChain(invoiceId: string): Promise<Invoice[]> {
+    const chain: Invoice[] = [];
+    let currentId: string | null = invoiceId;
+    const seen = new Set<string>();
+    let depth = 0;
+    const MAX_DEPTH = 10;
+
+    while (currentId) {
+      if (seen.has(currentId)) {
+        throw new Error("clone chain cycle detected");
+      }
+      if (depth >= MAX_DEPTH) {
+        throw new Error("clone chain depth exceeded");
+      }
+
+      seen.add(currentId);
+      const invoice = await this.getInvoice(currentId);
+      chain.unshift(invoice);
+
+      const ext = await this._getInvoiceExt(currentId);
+      currentId = ext.parentInvoiceId;
+      depth++;
+    }
+
+    return chain;
   }
 
   // ---------------------------------------------------------------------------

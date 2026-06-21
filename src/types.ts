@@ -64,6 +64,25 @@ export interface Payment {
   timestamp?: number;
 }
 
+/** A payment event reconstructed from contract event history. */
+export interface PaymentEventRecord extends Payment {
+  /** Ledger sequence when the event was emitted. */
+  ledger: number;
+}
+
+/** Result of reconciling invoice payments with contract events. */
+export interface PaymentReconciliationReport {
+  invoiceId: string;
+  invoice: Invoice;
+  invoiceFunded: bigint;
+  paymentRecordsTotal: bigint;
+  paymentEventsTotal: bigint;
+  fundedDiscrepancy: bigint;
+  recordsMatchEvents: boolean;
+  consistent: boolean;
+  paymentEvents: PaymentEventRecord[];
+}
+
 /** An archived invoice record. */
 export interface ArchivedInvoice {
   /** Invoice ID. */
@@ -110,6 +129,10 @@ export interface Invoice {
   lastModifiedLedger?: number;
   /** IDs of invoices that must be paid before this one. */
   prerequisites?: string[];
+  /** ID of the parent invoice this was cloned from (clone chain). */
+  parentInvoiceId?: string;
+  /** Depth in the clone chain (0 = root, 1 = cloned from root, etc.). */
+  cloneDepth?: number;
 }
 
 export interface InvoiceLifecycleHooks {
@@ -278,6 +301,15 @@ export interface VersionInfo {
   compatible: boolean;
 }
 
+/** Optional lifecycle hooks fired by StellarSplitClient methods. */
+export interface InvoiceLifecycleHooks {
+  onCreated?: (invoice: Invoice) => void;
+  onPaid?: (invoice: Invoice, payment: Payment) => void;
+  onReleased?: (invoice: Invoice) => void;
+  onRefunded?: (invoice: Invoice) => void;
+  onCancelled?: (invoice: Invoice) => void;
+}
+
 /** Fee breakdown for a payment amount. */
 export interface FeeBreakdown {
   /** Gross amount before fee deduction. */
@@ -365,6 +397,23 @@ export interface MemoryReport {
   listenerCount: number;
   estimatedKB: number;
   warnings: string[];
+}
+
+/** Overflow behavior for cloned invoices when payment exceeds remaining. */
+export type OverflowBehavior = "refund" | "rollback" | "escalate";
+
+/** Overrides for cloning an invoice. All fields are optional. */
+export interface CloneOverrides {
+  newDeadline?: number;
+  newAmounts?: bigint[];
+  newRecipients?: string[];
+  newOverflowBehavior?: OverflowBehavior;
+}
+
+/** Extended invoice data from get_invoice_ext. */
+export interface InvoiceExt {
+  parentInvoiceId: string | null;
+  cloneDepth: number;
 }
 
 /** Relationships between invoices (clones, groups, prerequisites). */

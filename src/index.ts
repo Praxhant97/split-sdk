@@ -24,6 +24,9 @@ export { CircuitBreakerMonitor, defaultCircuitBreakerMonitor } from "./circuitBr
 export { connectWallet, getPublicKey, signTransaction } from "./wallet.js";
 
 export { checkRPCHealth } from "./health.js";
+export { FallbackChain, FallbackExhaustedError } from "./fallbackChain.js";
+export { groupInvoicesByPattern } from "./smartGrouping.js";
+export type { InvoiceCluster } from "./smartGrouping.js";
 
 export { getOptimisticInvoice } from "./optimistic.js";
 
@@ -98,6 +101,30 @@ export { getSDKHealth, resetSDKHealth } from "./healthDashboard.js";
 
 export { getInvoiceAtTime } from "./timeMachine.js";
 export { NotificationCenter } from "./notificationCenter.js";
+export {
+  renderTemplate,
+  builtInNotificationTemplates,
+} from "./notificationTemplates.js";
+export type { InvoiceEvent, InvoiceEventType } from "./notificationTemplates.js";
+export { LoadBalancer } from "./loadBalancer.js";
+export type { EndpointState, LoadBalancerOptions } from "./loadBalancer.js";
+export {
+  generateFlowDiagram,
+  registerInvoiceFlowFetcher,
+} from "./flowVisualizer.js";
+export type { InvoiceFlowFetcher } from "./flowVisualizer.js";
+export {
+  compressPayload,
+  decompressPayload,
+  createCompressionRequestInterceptor,
+  createCompressionResponseInterceptor,
+} from "./compression.js";
+export type {
+  CompressionAlgorithm,
+  CompressionConfig,
+  CompressionPayload,
+  CompressedPayload,
+} from "./compression.js";
 
 export {
   StellarSplitError,
@@ -136,10 +163,11 @@ export type {
   CircuitBreakerStatus,
   HistoricalInvoice,
   ContractFeatures,
+  CloneOverrides,
+  OverflowBehavior,
+  InvoiceExt,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
-
-export { LedgerAdapter } from "./adapters/ledger.js";
 
 export { negotiateVersion, SDK_CONTRACT_VERSION } from "./version.js";
 export type { VersionInfo } from "./types.js";
@@ -184,4 +212,7 @@ export type { ComplianceReport } from "./compliance.js";
 
 export { ScheduledPaymentManager } from "./scheduler.js";
 export type { ScheduledPayment } from "./scheduler.js";
+
+export { compileFilter, applyFilter, FilterIndex } from "./invoiceFilter.js";
+export type { FilterCriteria, CompiledFilter } from "./invoiceFilter.js";
 
