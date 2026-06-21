@@ -58,6 +58,8 @@ export interface Payment {
   payer: string;
   /** Amount paid in stroops (1 XLM = 10_000_000 stroops). */
   amount: bigint;
+  /** Ledger sequence number where the payment was recorded. */
+  ledger?: number;
   /** Unix timestamp in seconds when the payment was made (optional). */
   timestamp?: number;
 }
@@ -131,6 +133,14 @@ export interface Invoice {
   parentInvoiceId?: string;
   /** Depth in the clone chain (0 = root, 1 = cloned from root, etc.). */
   cloneDepth?: number;
+}
+
+export interface InvoiceLifecycleHooks {
+  onCreated?: (invoice: Invoice) => void;
+  onPaid?: (invoice: Invoice, payment: Payment) => void;
+  onReleased?: (invoice: Invoice) => void;
+  onRefunded?: (invoice: Invoice) => void;
+  onCancelled?: (invoice: Invoice) => void;
 }
 
 /** Invoice receipt returned after a successful release. */

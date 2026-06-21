@@ -15,5 +15,11 @@ test-snapshots/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+coverage/
+test-results/
+**/__snapshots__/
+*.snap
+*.snapshot
+*.snapshot.json
 task1.md
 somzilla.md
