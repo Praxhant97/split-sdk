@@ -345,7 +345,7 @@ export class DeadlineEngine {
       if (b.callbacks.length === 0) this.buckets.delete(deadline);
 
       if (this.buckets.size === 0) {
-        this.destroyInternal(false);
+        this.destroyInternal();
       }
     };
   }

@@ -501,14 +501,19 @@ export class StellarSplitClient {
         })
       );
     }
-    if (overrides.newOverflowBehavior !== undefined) {
-      mapEntries.push(
-        new xdr.ScMapEntry({
-          key: nativeToScVal("new_overflow_behavior", { type: "symbol" }) as xdr.ScVal,
-          val: nativeToScVal(overrides.newOverflowBehavior, { type: "symbol" }) as xdr.ScVal,
-        })
-      );
-    }
+    // new_overflow_behavior is a Vec<OverflowBehavior> on the contract side (0 or 1
+    // elements), not an Option — the contract can't represent Option<PlainEnum> in a
+    // #[contracttype] struct, so the key is always sent.
+    mapEntries.push(
+      new xdr.ScMapEntry({
+        key: nativeToScVal("new_overflow_behavior", { type: "symbol" }) as xdr.ScVal,
+        val: xdr.ScVal.scvVec(
+          overrides.newOverflowBehavior !== undefined
+            ? [nativeToScVal(overrides.newOverflowBehavior, { type: "symbol" }) as xdr.ScVal]
+            : []
+        ) as xdr.ScVal,
+      })
+    );
 
     const args: xdr.ScVal[] = [
       nativeToScVal(BigInt(sourceId), { type: "u64" }),
@@ -526,17 +531,18 @@ export class StellarSplitClient {
         ? await this._retryEngine.execute(submitFn, "cloneInvoice")
         : await withRetry(submitFn, this.config.maxRetries ?? 3, 1000);
 
-      newInvoiceId = scValToNative(result.returnValue).toString();
+      const id = scValToNative(result.returnValue).toString() as string;
+      newInvoiceId = id;
 
       if (this._cache) {
         const cloneDepth =
-          typeof (sourceInvoice as Record<string, unknown>).cloneDepth === "number"
-            ? ((sourceInvoice as Record<string, unknown>).cloneDepth as number) + 1
+          typeof (sourceInvoice as unknown as Record<string, unknown>).cloneDepth === "number"
+            ? ((sourceInvoice as unknown as Record<string, unknown>).cloneDepth as number) + 1
             : 1;
 
         const optimisticInvoice: Invoice = {
           ...sourceInvoice,
-          id: newInvoiceId,
+          id,
           clonedFrom: sourceId,
           parentInvoiceId: sourceId,
           cloneDepth,
@@ -544,12 +550,12 @@ export class StellarSplitClient {
           payments: [],
           status: "Pending",
         };
-        this._cache.set(newInvoiceId, optimisticInvoice);
+        this._cache.set(id, optimisticInvoice);
         cacheWritten = true;
       }
 
       telemetry.recordMethod("cloneInvoice", true, Date.now() - startTime);
-      return newInvoiceId;
+      return id;
     } catch (error) {
       telemetry.recordMethod("cloneInvoice", false, Date.now() - startTime);
 
