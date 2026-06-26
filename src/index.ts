@@ -244,6 +244,13 @@ export type { BatcherConfig } from "./requestBatcher.js";
 
 export type { ComplianceReport } from "./compliance.js";
 
+export { exportComplianceReport, CSV_COLUMNS } from "./complianceExporter.js";
+export type {
+  ComplianceExportRecord,
+  ComplianceExportOptions,
+  ComplianceExportResult,
+} from "./complianceExporter.js";
+
 export { ScheduledPaymentManager } from "./scheduler.js";
 export type { ScheduledPayment } from "./scheduler.js";
 
