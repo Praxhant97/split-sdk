@@ -338,6 +338,20 @@ export type {
   ClaimableRefundEntry,
 } from "./claimableBalanceFallback.js";
 
+export {
+  bundleDisputeEvidence,
+  computeBundleChecksum,
+  verifyBundleChecksum,
+  registerProofFetcher,
+  registerAuditLogFetcher,
+  registerEventFetcher,
+} from "./disputeEvidenceBundler.js";
+export type {
+  DisputeEvidenceBundle,
+  ProofFetcher,
+  AuditLogFetcher,
+  EventFetcher,
+} from "./disputeEvidenceBundler.js";
 export { IdempotencyManager } from "./idempotency.js";
 export type { IdempotencyConfig } from "./idempotency.js";
 
