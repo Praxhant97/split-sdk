@@ -522,6 +522,88 @@ describe("pay", () => {
   });
 });
 
+describe("donateOnFailure flag", () => {
+  it("passes donateOnFailure=true to the contract call", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    const submitSpy = vi.spyOn(client as any, "_submitTx").mockResolvedValue({
+      txHash: "tx-donate",
+      returnValue: {},
+    } as any);
+    const contractCallSpy = vi.spyOn((client as any).contract, "call");
+
+    const payer = Keypair.random().publicKey();
+    const result = await client.pay({
+      payer,
+      invoiceId: "42",
+      amount: 5_000_000n,
+      donateOnFailure: true,
+    });
+
+    expect(result.txHash).toBe("tx-donate");
+    expect(contractCallSpy).toHaveBeenCalledWith(
+      "pay",
+      expect.anything(), // payer address ScVal
+      expect.anything(), // invoiceId ScVal
+      expect.anything(), // amount ScVal
+      expect.objectContaining({ _switch: expect.anything() }) // bool ScVal
+    );
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("defaults donateOnFailure to false when omitted", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    const submitSpy = vi.spyOn(client as any, "_submitTx").mockResolvedValue({
+      txHash: "tx-default",
+      returnValue: {},
+    } as any);
+    const contractCallSpy = vi.spyOn((client as any).contract, "call");
+
+    const payer = Keypair.random().publicKey();
+    await client.pay({ payer, invoiceId: "42", amount: 5_000_000n });
+
+    // Four args: payer, invoiceId, amount, donateOnFailure(false)
+    expect(contractCallSpy.mock.calls[0]).toHaveLength(5);
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("getPayments returns donateOnFailure per payment", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    vi.spyOn(client, "getInvoice").mockResolvedValue({
+      id: "7",
+      creator: "GCREATORXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      recipients: [],
+      token: "GUSDCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+      deadline: 1_700_000_000,
+      funded: 10_000_000n,
+      status: "Pending" as const,
+      payments: [
+        { payer: "GPAYER1XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", amount: 10_000_000n, donateOnFailure: true },
+        { payer: "GPAYER2XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", amount: 5_000_000n, donateOnFailure: false },
+      ],
+    });
+
+    const payments = await client.getPayments("7");
+
+    expect(payments[0]!.donateOnFailure).toBe(true);
+    expect(payments[1]!.donateOnFailure).toBe(false);
+  });
+});
+
 describe("bulk invoice operations", () => {
   it("returns partial success when one cancel fails", async () => {
     const client = new StellarSplitClient({

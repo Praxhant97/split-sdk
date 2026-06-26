@@ -210,6 +210,7 @@ export type {
   CloneOverrides,
   OverflowBehavior,
   InvoiceExt,
+  PaymentOptions,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 

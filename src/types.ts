@@ -62,6 +62,8 @@ export interface Payment {
   ledger?: number;
   /** Unix timestamp in seconds when the payment was made (optional). */
   timestamp?: number;
+  /** When true, funds are donated rather than refunded on invoice failure. */
+  donateOnFailure?: boolean;
 }
 
 /** A payment event reconstructed from contract event history. */
@@ -195,7 +197,15 @@ export interface PayParams {
   invoiceId: string;
   /** Amount to pay in stroops. */
   amount: bigint;
+  /**
+   * When true, the funds are donated rather than refunded if the invoice
+   * fails to reach its goal. Defaults to false.
+   */
+  donateOnFailure?: boolean;
 }
+
+/** @deprecated Use PayParams instead. */
+export type PaymentOptions = PayParams;
 
 /** Options for paginated queries. */
 export interface PaginationOptions {
