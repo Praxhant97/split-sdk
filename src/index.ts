@@ -279,3 +279,28 @@ export type {
   ClaimableRefundResult,
   ClaimableRefundEntry,
 } from "./claimableBalanceFallback.js";
+
+export { IdempotencyManager } from "./idempotency.js";
+export type { IdempotencyConfig } from "./idempotency.js";
+
+export {
+  validateInvoicePayload,
+  PayloadSizeError,
+} from "./payloadGuard.js";
+export type {
+  PayloadGuardConfig,
+  PayloadViolation,
+} from "./payloadGuard.js";
+
+export { computeCreatorReputation } from "./reputation.js";
+export type {
+  CreatorReputationScore,
+  ReputationConfig,
+} from "./reputation.js";
+
+export { computePaymentForecast } from "./forecast.js";
+export type {
+  PaymentForecast,
+  ForecastConfig,
+  HistoricalInvoiceSample,
+} from "./forecast.js";
