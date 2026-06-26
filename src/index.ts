@@ -294,3 +294,9 @@ export type {
   AuditLogFetcher,
   EventFetcher,
 } from "./disputeEvidenceBundler.js";
+
+export { UsageAnalyticsCollector, wrapWithAnalytics } from "./usageAnalytics.js";
+export type {
+  UsageAnalyticsConfig,
+  FeatureCountSnapshot,
+} from "./usageAnalytics.js";
