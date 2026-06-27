@@ -532,3 +532,23 @@ export interface PaymentCooldown {
   /** Unix timestamp (seconds) when the cooldown ends, or null if no cooldown is active. */
   cooldownEndsAt: number | null;
 }
+
+/** A structured cross-chain reference attached to an invoice. */
+export interface CrossChainRef {
+  /** Source chain identifier (e.g. "ethereum", "solana"). */
+  chain: string;
+  /** Transaction hash on the source chain. */
+  transactionHash: string;
+  /** Optional block number on the source chain. */
+  blockNumber?: string;
+}
+
+/** Parameters for setting a cross-chain reference on an invoice. */
+export interface SetCrossChainRefParams {
+  /** Invoice ID to attach the reference to. */
+  invoiceId: string;
+  /** Stellar address of the invoice creator (must sign). */
+  creator: string;
+  /** Cross-chain reference data. */
+  ref: CrossChainRef;
+}

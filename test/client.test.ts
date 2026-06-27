@@ -1235,6 +1235,93 @@ describe("adminFreeze / adminUnfreeze", () => {
   });
 });
 
+describe("getCrossChainRef / setCrossChainRef", () => {
+  const creator = Keypair.random().publicKey();
+
+  it("getCrossChainRef returns null when no ref is set", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    vi.spyOn(client as any, "_simulateView").mockResolvedValue(null);
+
+    const result = await client.getCrossChainRef("42");
+    expect(result).toBeNull();
+  });
+
+  it("getCrossChainRef parses cross-chain ref correctly", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    vi.spyOn(client as any, "_simulateView").mockResolvedValue({
+      chain: "ethereum",
+      tx_hash: "0xabc123",
+      block_number: "12345678",
+    });
+
+    const result = await client.getCrossChainRef("42");
+
+    expect(result).not.toBeNull();
+    expect(result!.chain).toBe("ethereum");
+    expect(result!.transactionHash).toBe("0xabc123");
+    expect(result!.blockNumber).toBe("12345678");
+  });
+
+  it("setCrossChainRef submits transaction and returns txHash", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    vi.spyOn(client as any, "_submitTx").mockResolvedValue({
+      txHash: "cross-chain-tx",
+      returnValue: {} as any,
+    });
+
+    const result = await client.setCrossChainRef({
+      invoiceId: "42",
+      creator,
+      ref: {
+        chain: "solana",
+        transactionHash: "0xsol123",
+        blockNumber: "987654",
+      },
+    });
+
+    expect(result.txHash).toBe("cross-chain-tx");
+  });
+
+  it("setCrossChainRef passes creator as source to _submitTx", async () => {
+    const client = new StellarSplitClient({
+      rpcUrl: "https://example.com",
+      networkPassphrase: "Test Network",
+      contractId: StrKey.encodeContract(Keypair.random().rawPublicKey()),
+    });
+
+    const submitSpy = vi.spyOn(client as any, "_submitTx").mockResolvedValue({
+      txHash: "tx",
+      returnValue: {} as any,
+    });
+
+    await client.setCrossChainRef({
+      invoiceId: "42",
+      creator,
+      ref: {
+        chain: "ethereum",
+        transactionHash: "0xeth123",
+      },
+    });
+
+    expect(submitSpy).toHaveBeenCalledWith(creator, expect.anything());
+  });
+});
+
 describe("getPaymentCooldown", () => {
   const payerAddr = Keypair.random().publicKey();
 

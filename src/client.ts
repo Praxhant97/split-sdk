@@ -60,6 +60,7 @@ import type {
   CloneOverrides,
   CoSignature,
   CreateInvoiceParams,
+  CrossChainRef,
   DisputeResult,
   FeeBreakdown,
   FeeEstimate,
@@ -87,6 +88,7 @@ import type {
   PaymentEventRecord,
   PaymentReconciliationReport,
   RolloverResult,
+  SetCrossChainRefParams,
 } from "./types.js";
 import type { DIContainer, IRPCClient, ICacheStore, IWalletAdapter } from "./container.js";
 import {
@@ -2345,6 +2347,85 @@ export class StellarSplitClient {
       return { txHash: result.txHash };
     } catch (error) {
       telemetry.recordMethod("adminUnfreeze", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cross-chain references
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetch the cross-chain reference for an invoice and parse it into a
+   * structured format.
+   *
+   * @param invoiceId - The invoice ID to query.
+   * @returns The parsed CrossChainRef, or null if none is set.
+   */
+  async getCrossChainRef(invoiceId: string): Promise<CrossChainRef | null> {
+    const startTime = Date.now();
+    try {
+      const operation = this.contract.call(
+        "get_cross_chain_ref",
+        nativeToScVal(BigInt(invoiceId), { type: "u64" })
+      );
+      const raw = await this._simulateView(operation) as Record<string, unknown> | null;
+      if (!raw) {
+        telemetry.recordMethod("getCrossChainRef", true, Date.now() - startTime);
+        return null;
+      }
+      const result: CrossChainRef = {
+        chain: String(raw.chain ?? raw.chain ?? ""),
+        transactionHash: String(raw.transactionHash ?? raw.tx_hash ?? ""),
+        blockNumber: raw.blockNumber != null ? String(raw.blockNumber) : raw.block_number != null ? String(raw.block_number) : undefined,
+      };
+      telemetry.recordMethod("getCrossChainRef", true, Date.now() - startTime);
+      return result;
+    } catch (error) {
+      telemetry.recordMethod("getCrossChainRef", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  /**
+   * Attach a cross-chain reference to an invoice. The creator address must sign.
+   *
+   * @param params - Parameters including invoiceId, creator, and the CrossChainRef.
+   * @returns The transaction hash.
+   */
+  async setCrossChainRef(params: SetCrossChainRefParams): Promise<TxResult> {
+    const startTime = Date.now();
+    try {
+      const refMap: xdr.ScMapEntry[] = [
+        new xdr.ScMapEntry({
+          key: nativeToScVal("chain", { type: "symbol" }) as xdr.ScVal,
+          val: nativeToScVal(params.ref.chain, { type: "string" }) as xdr.ScVal,
+        }),
+        new xdr.ScMapEntry({
+          key: nativeToScVal("tx_hash", { type: "symbol" }) as xdr.ScVal,
+          val: nativeToScVal(params.ref.transactionHash, { type: "string" }) as xdr.ScVal,
+        }),
+      ];
+      if (params.ref.blockNumber !== undefined) {
+        refMap.push(
+          new xdr.ScMapEntry({
+            key: nativeToScVal("block_number", { type: "symbol" }) as xdr.ScVal,
+            val: nativeToScVal(params.ref.blockNumber, { type: "string" }) as xdr.ScVal,
+          })
+        );
+      }
+
+      const operation = this.contract.call(
+        "set_cross_chain_ref",
+        nativeToScVal(BigInt(params.invoiceId), { type: "u64" }),
+        nativeToScVal(params.creator, { type: "address" }),
+        xdr.ScVal.scvMap(refMap)
+      );
+      const result = await this._submitTx(params.creator, operation);
+      telemetry.recordMethod("setCrossChainRef", true, Date.now() - startTime);
+      return { txHash: result.txHash };
+    } catch (error) {
+      telemetry.recordMethod("setCrossChainRef", false, Date.now() - startTime);
       throw error;
     }
   }

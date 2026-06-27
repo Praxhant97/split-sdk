@@ -214,6 +214,8 @@ export type {
   InvoiceExt,
   PaymentOptions,
   PaymentCooldown,
+  CrossChainRef,
+  SetCrossChainRefParams,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
