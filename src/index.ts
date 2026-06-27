@@ -174,6 +174,8 @@ export {
   CoCreatorApprovalNotRequiredError,
   ChainTooDeepError,
   CircularPrerequisiteError,
+  ForwardChainTooDeepError,
+  UnauthorizedError,
   parseSorobanError,
 } from "./errors.js";
 
@@ -213,11 +215,41 @@ export type {
   OverflowBehavior,
   InvoiceExt,
   PaymentOptions,
+  ClaimPayoutResult,
+  PayWithAttestationParams,
+  AttestationPaymentReceipt,
+  CreatorVolumeCap,
+  PaymentCooldown,
+  CrossChainRef,
+  SetCrossChainRefParams,
+  RolloverResult,
+  ScheduledReleaseCountdown,
+  DisputeStatus,
+  AuctionBid,
+  AuctionInfo,
+  TimelockAction,
+  QueueActionParams,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
 export { negotiateVersion, SDK_CONTRACT_VERSION } from "./version.js";
 export type { VersionInfo } from "./types.js";
+
+export { checkPayerReadiness } from "./preflightChecker.js";
+export type { PayerReadinessResult, PayerReadinessReason } from "./preflightChecker.js";
+
+export { getSuggestion } from "./errorSuggestions.js";
+
+export { analyzeCohorts } from "./cohortAnalyzer.js";
+export type { CohortBucket } from "./cohortAnalyzer.js";
+
+export {
+  recordWebhookEvent,
+  replayWebhook,
+  configureReplayStore,
+  RingBufferStore,
+} from "./webhookReplay.js";
+export type { WebhookRecord, WebhookReplayStore } from "./webhookReplay.js";
 // ---------------------------------------------------------------------------
 // Lazy factories for heavy modules
 // ---------------------------------------------------------------------------
