@@ -208,6 +208,7 @@ export interface StellarSplitClientConfig {
     /** Flush interval in milliseconds. Default: 60_000. */
     flushIntervalMs?: number;
   };
+  /**
    * Optional idempotency configuration for write methods.
    * When provided, duplicate submissions are detected and short-circuited.
    */
@@ -217,6 +218,7 @@ export interface StellarSplitClientConfig {
    * When provided, invoice payloads are checked before submission.
    */
   payloadGuard?: PayloadGuardConfig;
+  /**
    * Optional list of plugins to register at construction time.
    * Each plugin's `install()` is called during the constructor, and
    * `onInit()` is invoked once all subsystems are ready.
