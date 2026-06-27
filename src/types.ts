@@ -18,6 +18,16 @@ export interface ApprovalResult {
   reason?: string;
 }
 
+/** Result of an NFT gate status check for a creator address. */
+export interface NftGateResult {
+  /** Whether an NFT gate is configured for this creator. */
+  gated: boolean;
+  /** Whether the creator holds a qualifying NFT (only meaningful when gated is true). */
+  hasNft: boolean;
+  /** Address of the NFT contract used for gating, or null when not gated. */
+  contractAddress: string | null;
+}
+
 /** Parameters for an arbiter's vote on a dispute. */
 export interface ArbiterVote {
   invoiceId: string;

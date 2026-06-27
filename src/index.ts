@@ -177,6 +177,7 @@ export {
   ForwardChainTooDeepError,
   UnauthorizedError,
   parseSorobanError,
+  NftGateRequiredError,
 } from "./errors.js";
 
 export { SimpleCache } from "./cache.js";
@@ -215,6 +216,7 @@ export type {
   OverflowBehavior,
   InvoiceExt,
   PaymentOptions,
+  NftGateResult,
   ClaimPayoutResult,
   PayWithAttestationParams,
   AttestationPaymentReceipt,

@@ -92,6 +92,7 @@ import type {
   PaymentEventRecord,
   PaymentReconciliationReport,
   RolloverResult,
+  NftGateResult,
   ClaimPayoutResult,
   PayWithAttestationParams,
   AttestationPaymentReceipt,
@@ -105,6 +106,7 @@ import {
   InvoiceFrozenError,
   InvoiceNotFoundError,
   InvoiceNotPendingError,
+  NftGateRequiredError,
   UnauthorizedError,
   parseSorobanError,
 } from "./errors.js";
@@ -252,6 +254,9 @@ export interface NetworkConfig {
 export interface TxResult {
   txHash: string;
 }
+
+/** TTL for cached NFT gate status results (30 seconds). */
+const NFT_GATE_CACHE_TTL_MS = 30_000;
 
 /** Built-in network presets. */
 const NETWORKS: Record<string, NetworkConfig> = {
@@ -595,6 +600,11 @@ export class StellarSplitClient {
     try {
       if (this.config.payloadGuard) {
         validateInvoicePayload(params, this.config.payloadGuard);
+      }
+
+      const gate = await this.checkNftGate(params.creator);
+      if (gate.gated && !gate.hasNft) {
+        throw new NftGateRequiredError(params.creator, gate.contractAddress);
       }
 
       const recipientAddresses = params.recipients.map((r) =>
@@ -1060,15 +1070,27 @@ export class StellarSplitClient {
     });
   }
 
-  private _nftGateCache = new Map<string, { timestamp: number; result: { gated: boolean; hasNft: boolean; contractAddress: string | null } }>();
+  private _nftGateCache = new Map<string, { timestamp: number; result: NftGateResult }>();
 
   /**
-   * Checks the NFT gate status for a given creator address.
+   * Checks whether a creator address satisfies the configured NFT gate.
+   *
+   * Queries the on-chain `check_nft_gate` contract method and returns whether
+   * the creator has an NFT gate configured and, if so, whether they hold a
+   * qualifying NFT. Results are cached for 30 seconds per creator address.
+   *
+   * Call this before `createInvoice` when the contract has an NFT gate
+   * configured for the creator. `createInvoice` performs this check automatically.
+   *
+   * @param creatorAddress - The Stellar address of the invoice creator.
+   * @returns Gate status including whether gating applies and NFT ownership.
    */
-  async checkNftGate(creatorAddress: string): Promise<{ gated: boolean; hasNft: boolean; contractAddress: string | null }> {
+  async checkNftGate(creatorAddress: string): Promise<NftGateResult> {
+    const startTime = Date.now();
     const now = Date.now();
     const cached = this._nftGateCache.get(creatorAddress);
-    if (cached && now - cached.timestamp < 30000) {
+    if (cached && now - cached.timestamp < NFT_GATE_CACHE_TTL_MS) {
+      telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
       return cached.result;
     }
 
@@ -1077,26 +1099,25 @@ export class StellarSplitClient {
         "check_nft_gate",
         nativeToScVal(creatorAddress, { type: "address" })
       );
-      
-      const raw = await this._simulateView(operation) as any;
-      let result = { gated: false, hasNft: false, contractAddress: null };
-      
-      if (raw && typeof raw === "object") {
-        result = {
-          gated: Boolean(raw.gated),
-          hasNft: Boolean(raw.hasNft || raw.has_nft),
-          contractAddress: (raw.contractAddress || raw.contract_address) ?? null
-        };
-      }
-      
+
+      const raw = await this._simulateView(operation);
+      const result = this._parseNftGateResult(raw);
+
       this._nftGateCache.set(creatorAddress, { timestamp: now, result });
+      telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
       return result;
-    } catch (error) {
-      // If the method doesn't exist or fails, assume no gate
-      const result = { gated: false, hasNft: false, contractAddress: null };
+    } catch {
+      // If the method doesn't exist or fails, assume no gate is configured.
+      const result: NftGateResult = { gated: false, hasNft: false, contractAddress: null };
       this._nftGateCache.set(creatorAddress, { timestamp: now, result });
+      telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
       return result;
     }
+  }
+
+  /** Clears the NFT gate status cache (useful for testing). */
+  clearNftGateCache(): void {
+    this._nftGateCache.clear();
   }
 
   /**
@@ -2698,6 +2719,22 @@ export class StellarSplitClient {
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
+
+  /** Parse the native return value from `check_nft_gate`. */
+  private _parseNftGateResult(raw: unknown): NftGateResult {
+    if (!raw || typeof raw !== "object") {
+      return { gated: false, hasNft: false, contractAddress: null };
+    }
+
+    const obj = raw as Record<string, unknown>;
+    const contractAddress = obj.contractAddress ?? obj.contract_address ?? null;
+
+    return {
+      gated: Boolean(obj.gated),
+      hasNft: Boolean(obj.hasNft ?? obj.has_nft),
+      contractAddress: typeof contractAddress === "string" ? contractAddress : null,
+    };
+  }
 
   /** Simulate a read-only contract call and return the native-decoded result. */
   private async _simulateView(operation: xdr.Operation): Promise<unknown> {
