@@ -91,6 +91,15 @@ export class CoCreatorApprovalNotRequiredError extends StellarSplitError {
   }
 }
 
+/** Thrown when resolving a forward chain exceeds the maximum depth limit. */
+export class ForwardChainTooDeepError extends StellarSplitError {
+  constructor(message: string, raw?: string) {
+    super(message, raw ?? message);
+    this.name = "ForwardChainTooDeepError";
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Error message patterns from the Soroban contract
 // ---------------------------------------------------------------------------
