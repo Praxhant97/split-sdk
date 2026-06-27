@@ -143,6 +143,7 @@ import type {
 } from "./claimableBalanceFallback.js";
 import { Asset } from "@stellar/stellar-sdk";
 import { rolloverInvoice as _rolloverInvoice } from "./invoiceRollover.js";
+import { BatchedRpcClient } from "./requestBatcher.js";
 
 /** A plugin that extends StellarSplitClient with new methods and lifecycle hooks. */
 export interface StellarSplitPlugin {
@@ -286,6 +287,7 @@ export class StellarSplitClient {
   private _retryEngine: RetryEngine | null = null;
   private _horizonReader: HorizonFallbackReader | null = null;
   private _idempotency: IdempotencyManager | null = null;
+  private _batcher: BatchedRpcClient | null = null;
 
   private get server(): SorobanRpc.Server {
     return this._rpcClient ?? this._standby?.server ?? this._mainServer;
@@ -423,6 +425,26 @@ export class StellarSplitClient {
     }
     for (const p of this._pluginInstances) {
       p.onInit?.(this);
+    }
+  }
+
+  /**
+   * Enable or disable request batching for read methods (getInvoice, getPaymentHistory, getInvoiceExt).
+   * Disabled by default — opt-in to batch concurrent RPC calls within a 10 ms window.
+   * @param enabled - Pass `true` to enable batching, `false` to disable.
+   */
+  setBatchingEnabled(enabled: boolean): void {
+    if (enabled) {
+      if (!this._batcher) {
+        this._batcher = new BatchedRpcClient({
+          fetchInvoice: (id) => this._fetchInvoice(id),
+          fetchPaymentHistory: (id) => this._fetchPaymentHistory(id),
+          fetchInvoiceExt: (id) => this._fetchInvoiceExt(id),
+        });
+      }
+    } else {
+      this._batcher?.clear();
+      this._batcher = null;
     }
   }
 
@@ -843,7 +865,10 @@ export class StellarSplitClient {
       const cached = this._cache.get(invoiceId);
       if (cached) return cached;
     }
-    const invoice = await this._dedup.dedupe(invoiceId, () => this._fetchInvoice(invoiceId));
+    const fetcher = this._batcher
+      ? () => this._batcher!.getInvoice(invoiceId)
+      : () => this._fetchInvoice(invoiceId);
+    const invoice = await this._dedup.dedupe(invoiceId, fetcher);
     if (this._cache) {
       this._cache.set(invoiceId, invoice);
     }
@@ -2377,6 +2402,13 @@ export class StellarSplitClient {
    * @returns All payments merged and sorted by timestamp (ascending).
    */
   async getPaymentHistory(invoiceId: string): Promise<Payment[]> {
+    if (this._batcher) {
+      return this._batcher.getPaymentHistory(invoiceId);
+    }
+    return this._fetchPaymentHistory(invoiceId);
+  }
+
+  private async _fetchPaymentHistory(invoiceId: string): Promise<Payment[]> {
     const startTime = Date.now();
     try {
       const NUM_SHARDS = 8;
@@ -2419,6 +2451,9 @@ export class StellarSplitClient {
       return allPayments;
     } catch (error) {
       telemetry.recordMethod("getPaymentHistory", false, Date.now() - startTime);
+      throw error;
+    }
+  }
   /**
    * Settle an auction for an invoice, releasing funds to the winning bidder.
    * @param caller - Stellar address of the caller (must sign).
@@ -2957,6 +2992,11 @@ export class StellarSplitClient {
       parentInvoiceId: raw.parentInvoiceId ? String(raw.parentInvoiceId) : null,
       cloneDepth: Number(raw.cloneDepth ?? 0),
     };
+  }
+
+  /** Batcher-facing alias for _getInvoiceExt. */
+  private _fetchInvoiceExt(invoiceId: string): Promise<InvoiceExt> {
+    return this._getInvoiceExt(invoiceId);
   }
 
   /**
