@@ -211,6 +211,7 @@ export type {
   OverflowBehavior,
   InvoiceExt,
   PaymentOptions,
+  RolloverResult,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
