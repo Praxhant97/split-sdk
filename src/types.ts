@@ -135,6 +135,16 @@ export interface Invoice {
   parentInvoiceId?: string;
   /** Depth in the clone chain (0 = root, 1 = cloned from root, etc.). */
   cloneDepth?: number;
+  /** The address of the NFT contract used for gating, if any. */
+  nft_gate?: string;
+  /** ID of the next invoice in the forward chain, if any. */
+  forward_invoice_id?: string;
+  /** Unix timestamp after which penalties apply. */
+  penalty_deadline?: number;
+  /** Configured penalty tiers for late payments. */
+  penalty_tiers?: { days_late: number; penalty_bps: number }[];
+  /** List of caller addresses permitted to interact, or null if open. */
+  allowed_callers?: string[] | null;
 }
 
 export interface InvoiceLifecycleHooks {

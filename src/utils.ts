@@ -1,6 +1,7 @@
 /**
  * Utility helpers for StellarSplit SDK.
  */
+import { Invoice } from "./types";
 
 /** Number of decimal places used by Stellar token amounts (stroops). */
 const STROOPS_PER_UNIT = 10_000_000n;
@@ -56,4 +57,55 @@ export function isExpired(deadline: number): boolean {
 export function truncateAddress(address: string, chars = 4): string {
   if (address.length <= chars * 2 + 3) return address;
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
+}
+
+/**
+ * Validates if a caller is in the invoice's allowed callers list.
+ */
+export function validateCallerAllowlist(
+  invoice: Invoice,
+  callerAddress: string
+): { allowed: boolean; reason?: string } {
+  if (!invoice.allowed_callers) {
+    return { allowed: true };
+  }
+  if (invoice.allowed_callers.includes(callerAddress)) {
+    return { allowed: true };
+  }
+  return { allowed: false, reason: "caller not in allowlist" };
+}
+
+/**
+ * Computes the penalty amount owed for a late payment.
+ */
+export function calculatePenalty(
+  invoice: Invoice,
+  paymentTimestamp: number
+): { penaltyBps: number; penaltyAmount: bigint; tier: number | null } {
+  if (!invoice.penalty_deadline || paymentTimestamp <= invoice.penalty_deadline) {
+    return { penaltyBps: 0, penaltyAmount: 0n, tier: null };
+  }
+  
+  if (!invoice.penalty_tiers || invoice.penalty_tiers.length === 0) {
+    return { penaltyBps: 0, penaltyAmount: 0n, tier: null };
+  }
+
+  const daysLate = Math.ceil((paymentTimestamp - invoice.penalty_deadline) / 86400);
+  
+  // Sort tiers by days_late descending to find the highest applicable tier
+  const sortedTiers = [...invoice.penalty_tiers].sort((a, b) => b.days_late - a.days_late);
+  const applicableTier = sortedTiers.find(tier => daysLate >= tier.days_late);
+
+  if (!applicableTier) {
+    return { penaltyBps: 0, penaltyAmount: 0n, tier: null };
+  }
+
+  const totalAmount = invoice.recipients.reduce((sum, r) => sum + r.amount, 0n);
+  const penaltyAmount = (totalAmount * BigInt(applicableTier.penalty_bps)) / 10000n;
+
+  return {
+    penaltyBps: applicableTier.penalty_bps,
+    penaltyAmount,
+    tier: invoice.penalty_tiers.indexOf(applicableTier)
+  };
 }

@@ -88,14 +88,20 @@ import type {
   RolloverResult,
 } from "./types.js";
 import type { DIContainer, IRPCClient, ICacheStore, IWalletAdapter } from "./container.js";
-import { InvoiceNotFoundError } from "./types.js";
+import {
+  CoCreatorApprovalNotRequiredError,
+  ForwardChainTooDeepError,
+  InvoiceFrozenError,
+  InvoiceNotFoundError,
+  InvoiceNotPendingError,
+  parseSorobanError,
+} from "./errors.js";
 import { replayEvents } from "./events.js";
 import { subscribeToInvoice as _subscribeToInvoice } from "./stream.js";
 import { ConnectionPool } from "./connectionPool.js";
 import { snapshotInvoice as _snapshotInvoice } from "./snapshot.js";
 import type { InvoiceSnapshot } from "./snapshot.js";
 import { SimpleCache } from "./cache.js";
-import { parseSorobanError } from "./errors.js";
 import { validateOrThrow } from "./configValidator.js";
 import { extendStorageTtl, buildInvoiceDataLedgerKey } from "./ttlExtension.js";
 import type { TtlExtensionOptions, TtlExtensionResult } from "./ttlExtension.js";
@@ -203,6 +209,7 @@ export interface StellarSplitClientConfig {
     /** Flush interval in milliseconds. Default: 60_000. */
     flushIntervalMs?: number;
   };
+  /**
    * Optional idempotency configuration for write methods.
    * When provided, duplicate submissions are detected and short-circuited.
    */
@@ -212,6 +219,7 @@ export interface StellarSplitClientConfig {
    * When provided, invoice payloads are checked before submission.
    */
   payloadGuard?: PayloadGuardConfig;
+  /**
    * Optional list of plugins to register at construction time.
    * Each plugin's `install()` is called during the constructor, and
    * `onInit()` is invoked once all subsystems are ready.
@@ -987,6 +995,77 @@ export class StellarSplitClient {
         error: result.reason instanceof Error ? result.reason.message : String(result.reason),
       };
     });
+  }
+
+  private _nftGateCache = new Map<string, { timestamp: number; result: { gated: boolean; hasNft: boolean; contractAddress: string | null } }>();
+
+  /**
+   * Checks the NFT gate status for a given creator address.
+   */
+  async checkNftGate(creatorAddress: string): Promise<{ gated: boolean; hasNft: boolean; contractAddress: string | null }> {
+    const now = Date.now();
+    const cached = this._nftGateCache.get(creatorAddress);
+    if (cached && now - cached.timestamp < 30000) {
+      return cached.result;
+    }
+
+    try {
+      const operation = this.contract.call(
+        "check_nft_gate",
+        nativeToScVal(creatorAddress, { type: "address" })
+      );
+      
+      const raw = await this._simulateView(operation) as any;
+      let result = { gated: false, hasNft: false, contractAddress: null };
+      
+      if (raw && typeof raw === "object") {
+        result = {
+          gated: Boolean(raw.gated),
+          hasNft: Boolean(raw.hasNft || raw.has_nft),
+          contractAddress: (raw.contractAddress || raw.contract_address) ?? null
+        };
+      }
+      
+      this._nftGateCache.set(creatorAddress, { timestamp: now, result });
+      return result;
+    } catch (error) {
+      // If the method doesn't exist or fails, assume no gate
+      const result = { gated: false, hasNft: false, contractAddress: null };
+      this._nftGateCache.set(creatorAddress, { timestamp: now, result });
+      return result;
+    }
+  }
+
+  /**
+   * Resolves the forward chain for an invoice.
+   */
+  async getForwardChain(invoiceId: string): Promise<Array<{ id: string; status: InvoiceStatus; forwardTo?: string }>> {
+    const chain: Array<{ id: string; status: InvoiceStatus; forwardTo?: string }> = [];
+    const visited = new Set<string>();
+    let currentId: string | undefined = invoiceId;
+    let depth = 0;
+
+    while (currentId) {
+      if (depth >= 10) {
+        throw new ForwardChainTooDeepError(`Max chain depth of 10 exceeded starting from invoice ${invoiceId}`);
+      }
+      if (visited.has(currentId)) {
+        throw new Error(`Circular forward chain detected at invoice ${currentId}`);
+      }
+      visited.add(currentId);
+      depth++;
+
+      const invoice = await this.getInvoice(currentId);
+      chain.push({
+        id: invoice.id,
+        status: invoice.status,
+        forwardTo: invoice.forward_invoice_id,
+      });
+
+      currentId = invoice.forward_invoice_id;
+    }
+
+    return chain;
   }
 
   /**
