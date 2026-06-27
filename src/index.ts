@@ -174,7 +174,12 @@ export {
   PaymentExceedsRemainingError,
   InvoiceFrozenError,
   CoCreatorApprovalNotRequiredError,
+  ChainTooDeepError,
+  CircularPrerequisiteError,
+  ForwardChainTooDeepError,
+  UnauthorizedError,
   parseSorobanError,
+  NftGateRequiredError,
 } from "./errors.js";
 
 export { SimpleCache } from "./cache.js";
@@ -213,6 +218,15 @@ export type {
   OverflowBehavior,
   InvoiceExt,
   PaymentOptions,
+  NftGateResult,
+  ClaimPayoutResult,
+  PayWithAttestationParams,
+  AttestationPaymentReceipt,
+  CreatorVolumeCap,
+  PaymentCooldown,
+  CrossChainRef,
+  SetCrossChainRefParams,
+  RolloverResult,
   ScheduledReleaseCountdown,
   DisputeStatus,
   AuctionBid,
@@ -225,6 +239,22 @@ export { InvalidTransitionError } from "./types.js";
 
 export { negotiateVersion, SDK_CONTRACT_VERSION } from "./version.js";
 export type { VersionInfo } from "./types.js";
+
+export { checkPayerReadiness } from "./preflightChecker.js";
+export type { PayerReadinessResult, PayerReadinessReason } from "./preflightChecker.js";
+
+export { getSuggestion } from "./errorSuggestions.js";
+
+export { analyzeCohorts } from "./cohortAnalyzer.js";
+export type { CohortBucket } from "./cohortAnalyzer.js";
+
+export {
+  recordWebhookEvent,
+  replayWebhook,
+  configureReplayStore,
+  RingBufferStore,
+} from "./webhookReplay.js";
+export type { WebhookRecord, WebhookReplayStore } from "./webhookReplay.js";
 // ---------------------------------------------------------------------------
 // Lazy factories for heavy modules
 // ---------------------------------------------------------------------------
@@ -291,6 +321,18 @@ export type {
 // Payment velocity tracking
 export { trackVelocity } from "./velocityTracker.js";
 export type { VelocityReport, InvoiceVelocity, PaymentTrend } from "./velocityTracker.js";
+export type { VelocityStatus, VelocityWindowStatus } from "./types.js";
+
+// Tranche release progress tracking
+export { getTrancheProgress } from "./trancheProgress.js";
+export type {
+  TrancheProgress,
+  TrancheProgressReport,
+  TrancheProgressOptions,
+  TrancheConfig,
+  TranchedInvoice,
+  TrancheStatus,
+} from "./trancheProgress.js";
 export { Sep41Adapter, createSep41Adapter } from "./sep41Adapter.js";
 export type { Sep41TokenCapabilities } from "./sep41Adapter.js";
 
@@ -403,3 +445,23 @@ export type {
   ForecastConfig,
   HistoricalInvoiceSample,
 } from "./forecast.js";
+
+export { getInvoiceStats, computeInvoiceStats } from "./invoiceStats.js";
+
+export { previewSplitRules } from "./splitPreview.js";
+
+export { simulateAutoResolve } from "./autoResolveSimulator.js";
+
+export {
+  resolvePrerequisiteChain,
+  MAX_PREREQUISITE_CHAIN_DEPTH,
+} from "./prerequisiteChain.js";
+
+export type {
+  SplitRule,
+  SplitPreviewEntry,
+  AutoResolveRule,
+  AutoResolveSimulation,
+  InvoiceStats,
+  PrerequisiteChainEntry,
+} from "./types.js";
