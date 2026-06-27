@@ -173,6 +173,7 @@ export {
   InvoiceFrozenError,
   CoCreatorApprovalNotRequiredError,
   parseSorobanError,
+  NftGateRequiredError,
 } from "./errors.js";
 
 export { SimpleCache } from "./cache.js";
@@ -211,6 +212,7 @@ export type {
   OverflowBehavior,
   InvoiceExt,
   PaymentOptions,
+  NftGateResult,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
