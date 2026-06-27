@@ -148,6 +148,15 @@ export interface ScheduledReleaseCountdown {
   overdue: boolean;
 }
 
+/** Status of a dispute on an invoice. */
+export interface DisputeStatus {
+  invoiceId: string;
+  disputed: boolean;
+  arbiter: string;
+  resolved: boolean;
+  resolution: "approved" | "rejected" | null;
+}
+
 export interface InvoiceLifecycleHooks {
   onCreated?: (invoice: Invoice) => void;
   onPaid?: (invoice: Invoice, payment: Payment) => void;

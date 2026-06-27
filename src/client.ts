@@ -54,6 +54,7 @@ import { generatePaymentProof } from "./proof.js";
 import type {
   ArchivedInvoice,
   ArbiterVote,
+  DisputeStatus,
   BatchPayment,
   BatchResolveResult,
   BulkResult,
@@ -488,23 +489,74 @@ export class StellarSplitClient {
   }
 
   /**
-   * Resolve a dispute for an invoice.
+   * Resolve a dispute for an invoice. The arbiter address must co-sign the resolution.
    * @param invoiceId - The ID of the invoice to resolve dispute for.
+   * @param arbiter - The Stellar address of the arbiter (must sign).
    * @returns The dispute ID and transaction hash.
    */
-  async resolveDispute(invoiceId: string): Promise<DisputeResult> {
+  async resolveDispute(invoiceId: string, arbiter: string): Promise<DisputeResult> {
     const startTime = Date.now();
     try {
       const operation = this.contract.call(
         "resolve_dispute",
         nativeToScVal(BigInt(invoiceId), { type: "u64" })
       );
-      const result = await this._submitTx(this.config.contractId, operation);
+      const result = await this._submitTx(arbiter, operation);
       const disputeId = scValToNative(result.returnValue).toString();
       telemetry.recordMethod("resolveDispute", true, Date.now() - startTime);
       return { disputeId, txHash: result.txHash };
     } catch (error) {
       telemetry.recordMethod("resolveDispute", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  /**
+   * Raise a dispute on an invoice.
+   * @param invoiceId - The ID of the invoice to dispute.
+   * @returns The dispute ID and transaction hash.
+   */
+  async raiseDispute(invoiceId: string): Promise<DisputeResult> {
+    const startTime = Date.now();
+    try {
+      const operation = this.contract.call(
+        "dispute_invoice",
+        nativeToScVal(BigInt(invoiceId), { type: "u64" })
+      );
+      const result = await this._submitTx(this.config.contractId, operation);
+      const disputeId = scValToNative(result.returnValue).toString();
+      telemetry.recordMethod("raiseDispute", true, Date.now() - startTime);
+      return { disputeId, txHash: result.txHash };
+    } catch (error) {
+      telemetry.recordMethod("raiseDispute", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the dispute status for an invoice.
+   * @param invoiceId - The ID of the invoice to query.
+   * @returns The dispute status.
+   */
+  async getDisputeStatus(invoiceId: string): Promise<DisputeStatus> {
+    const startTime = Date.now();
+    try {
+      const operation = this.contract.call(
+        "get_dispute_status",
+        nativeToScVal(BigInt(invoiceId), { type: "u64" })
+      );
+      const raw = await this._simulateView(operation) as Record<string, unknown>;
+      const status: DisputeStatus = {
+        invoiceId,
+        disputed: Boolean(raw.disputed),
+        arbiter: raw.arbiter as string,
+        resolved: Boolean(raw.resolved),
+        resolution: raw.resolution === "approved" ? "approved" : raw.resolution === "rejected" ? "rejected" : null,
+      };
+      telemetry.recordMethod("getDisputeStatus", true, Date.now() - startTime);
+      return status;
+    } catch (error) {
+      telemetry.recordMethod("getDisputeStatus", false, Date.now() - startTime);
       throw error;
     }
   }

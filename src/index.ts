@@ -212,6 +212,7 @@ export type {
   InvoiceExt,
   PaymentOptions,
   ScheduledReleaseCountdown,
+  DisputeStatus,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 
