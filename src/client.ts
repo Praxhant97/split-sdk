@@ -92,6 +92,9 @@ import type {
   PaymentEventRecord,
   PaymentReconciliationReport,
   RolloverResult,
+  ClaimPayoutResult,
+  PayWithAttestationParams,
+  AttestationPaymentReceipt,
   SetCrossChainRefParams,
   ScheduledReleaseCountdown,
 } from "./types.js";
@@ -2257,6 +2260,7 @@ export class StellarSplitClient {
     }
   }
 
+
   // ---------------------------------------------------------------------------
   // Payment cooldown
   // ---------------------------------------------------------------------------
@@ -3214,6 +3218,265 @@ export class StellarSplitClient {
     }
 
     return successful.reduce((best, cur) => cur.ledger > best.ledger ? cur : best);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Issue #274 — Pending payout claim helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get the claimable payout amount for a recipient on an invoice.
+   * Returns 0n if no pending payout exists.
+   */
+  async getPendingPayout(invoiceId: string, recipient: string): Promise<bigint> {
+    const startTime = Date.now();
+    try {
+      const operation = this.contract.call(
+        "get_pending_payout",
+        nativeToScVal(BigInt(invoiceId), { type: "u64" }),
+        nativeToScVal(recipient, { type: "address" })
+      );
+      const raw = await this._simulateView(operation);
+      const amount = raw == null ? 0n : BigInt(raw as string | number | bigint);
+      telemetry.recordMethod("getPendingPayout", true, Date.now() - startTime);
+      return amount;
+    } catch {
+      telemetry.recordMethod("getPendingPayout", false, Date.now() - startTime);
+      return 0n;
+    }
+  }
+
+  /**
+   * Claim a pending payout for a recipient on an invoice.
+   * Emits a `pending_payout_claimed` event on success.
+   * @throws If no pending payout exists for the recipient.
+   */
+  async claimPendingPayout(invoiceId: string, recipient: string): Promise<ClaimPayoutResult> {
+    const startTime = Date.now();
+    try {
+      const pending = await this.getPendingPayout(invoiceId, recipient);
+      if (pending === 0n) {
+        throw new Error(`No pending payout for recipient ${recipient} on invoice ${invoiceId}`);
+      }
+      const operation = this.contract.call(
+        "claim_pending_payout",
+        nativeToScVal(BigInt(invoiceId), { type: "u64" }),
+        nativeToScVal(recipient, { type: "address" })
+      );
+      const result = await this._submitTx(recipient, operation);
+      telemetry.recordMethod("claimPendingPayout", true, Date.now() - startTime);
+      return { txHash: result.txHash, invoiceId, recipient };
+    } catch (error) {
+      telemetry.recordMethod("claimPendingPayout", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Issue #275 — Pay with attestation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Pay toward an invoice bound to an off-chain identity attestation.
+   * Validates attestationHash (32 bytes) and signature (64 bytes) before submission.
+   * Returns a payment receipt with the attestation hash included.
+   */
+  async payWithAttestation(params: PayWithAttestationParams): Promise<AttestationPaymentReceipt> {
+    const startTime = Date.now();
+    try {
+      if (params.attestationHash.length !== 32) {
+        throw new Error(`attestationHash must be 32 bytes, got ${params.attestationHash.length}`);
+      }
+      if (params.signature.length !== 64) {
+        throw new Error(`signature must be 64 bytes, got ${params.signature.length}`);
+      }
+      const operation = this.contract.call(
+        "pay_with_attestation",
+        nativeToScVal(params.payer, { type: "address" }),
+        nativeToScVal(BigInt(params.invoiceId), { type: "u64" }),
+        nativeToScVal(params.amount, { type: "i128" }),
+        xdr.ScVal.scvBytes(Buffer.from(params.attestationHash)),
+        xdr.ScVal.scvBytes(Buffer.from(params.signature)),
+        nativeToScVal(params.signerPubkey, { type: "address" })
+      );
+      const result = await this._submitTx(params.payer, operation);
+      const attestationHash = Buffer.from(params.attestationHash).toString("hex");
+      telemetry.recordMethod("payWithAttestation", true, Date.now() - startTime);
+      return { txHash: result.txHash, invoiceId: params.invoiceId, amount: params.amount, attestationHash };
+    } catch (error) {
+      telemetry.recordMethod("payWithAttestation", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Issue #276 — Creator volume cap status checker
+  // ---------------------------------------------------------------------------
+
+  /** Returns the volume cap for a creator in token units, or null if uncapped. */
+  async getCreatorVolumeCap(address: string): Promise<bigint | null> {
+    const startTime = Date.now();
+    try {
+      const operation = this.contract.call(
+        "get_creator_volume_cap",
+        nativeToScVal(address, { type: "address" })
+      );
+      const raw = await this._simulateView(operation);
+      const cap = raw == null ? null : BigInt(raw as string | number | bigint);
+      telemetry.recordMethod("getCreatorVolumeCap", true, Date.now() - startTime);
+      return cap;
+    } catch {
+      telemetry.recordMethod("getCreatorVolumeCap", false, Date.now() - startTime);
+      return null;
+    }
+  }
+
+  /** Returns the lifetime volume used by a creator in token units. */
+  async getCreatorVolumeUsed(address: string): Promise<bigint> {
+    const startTime = Date.now();
+    try {
+      const operation = this.contract.call(
+        "get_creator_volume_used",
+        nativeToScVal(address, { type: "address" })
+      );
+      const raw = await this._simulateView(operation);
+      const used = raw == null ? 0n : BigInt(raw as string | number | bigint);
+      telemetry.recordMethod("getCreatorVolumeUsed", true, Date.now() - startTime);
+      return used;
+    } catch {
+      telemetry.recordMethod("getCreatorVolumeUsed", false, Date.now() - startTime);
+      return 0n;
+    }
+  }
+
+  /** Returns remaining volume (cap - used) or Infinity if the creator is uncapped. */
+  async getRemainingCreatorVolume(address: string): Promise<bigint | typeof Infinity> {
+    const [cap, used] = await Promise.all([
+      this.getCreatorVolumeCap(address),
+      this.getCreatorVolumeUsed(address),
+    ]);
+    if (cap === null) return Infinity;
+    return cap > used ? cap - used : 0n;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Issue #277 — Batch invoice creation helper
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Create up to 10 invoices in a single fee-bump transaction.
+   * Validates all items before submission; fails fast on the first invalid item.
+   * Returns invoice IDs in the same order as the input array.
+   */
+  async createInvoiceBatch(
+    items: CreateInvoiceParams[]
+  ): Promise<{ invoiceIds: string[]; txHash: string }> {
+    if (items.length === 0 || items.length > 10) {
+      throw new Error("Batch size must be between 1 and 10 items");
+    }
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      if (!item.creator) throw new Error(`Item ${i}: creator is required`);
+      if (!item.token) throw new Error(`Item ${i}: token is required`);
+      if (!item.deadline || item.deadline <= 0) throw new Error(`Item ${i}: deadline must be a positive number`);
+      if (!Array.isArray(item.recipients) || item.recipients.length === 0) {
+        throw new Error(`Item ${i}: recipients must be a non-empty array`);
+      }
+      if (this.config.payloadGuard) {
+        validateInvoicePayload(item, this.config.payloadGuard);
+      }
+    }
+
+    const creator = items[0]!.creator;
+    const invoiceParamVals = items.map((p) =>
+      xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+          key: nativeToScVal("creator", { type: "symbol" }) as xdr.ScVal,
+          val: nativeToScVal(p.creator, { type: "address" }) as xdr.ScVal,
+        }),
+        new xdr.ScMapEntry({
+          key: nativeToScVal("recipients", { type: "symbol" }) as xdr.ScVal,
+          val: xdr.ScVal.scvVec(p.recipients.map((r) => nativeToScVal(r.address, { type: "address" }))),
+        }),
+        new xdr.ScMapEntry({
+          key: nativeToScVal("amounts", { type: "symbol" }) as xdr.ScVal,
+          val: xdr.ScVal.scvVec(p.recipients.map((r) => nativeToScVal(r.amount, { type: "i128" }))),
+        }),
+        new xdr.ScMapEntry({
+          key: nativeToScVal("token", { type: "symbol" }) as xdr.ScVal,
+          val: nativeToScVal(p.token, { type: "address" }) as xdr.ScVal,
+        }),
+        new xdr.ScMapEntry({
+          key: nativeToScVal("deadline", { type: "symbol" }) as xdr.ScVal,
+          val: nativeToScVal(p.deadline, { type: "u64" }) as xdr.ScVal,
+        }),
+      ])
+    );
+
+    const operation = this.contract.call(
+      "create_invoice_batch",
+      xdr.ScVal.scvVec(invoiceParamVals)
+    );
+
+    const startTime = Date.now();
+    try {
+      const account = await this.server.getAccount(creator);
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: this.config.networkPassphrase,
+      })
+        .addOperation(operation)
+        .setTimeout(30)
+        .build();
+
+      const simResult = await this.server.simulateTransaction(tx);
+      if (SorobanRpc.Api.isSimulationError(simResult)) {
+        throw new Error(`Simulation failed: ${simResult.error}`);
+      }
+
+      const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
+      const bumpedFee = String(Math.ceil(Number(BASE_FEE) * (this.config.feeBumpMultiplier ?? 2) * items.length));
+      const feeBumpTx = TransactionBuilder.buildFeeBumpTransaction(
+        creator,
+        bumpedFee,
+        preparedTx as Parameters<typeof TransactionBuilder.buildFeeBumpTransaction>[2],
+        this.config.networkPassphrase
+      );
+
+      const signedXdr = await (this._adapter
+        ? this._adapter.signTransaction(feeBumpTx.toXDR(), this.config.networkPassphrase)
+        : signTransaction(feeBumpTx.toXDR(), this.config.networkPassphrase));
+
+      const sendResult = await this.server.sendTransaction(
+        TransactionBuilder.fromXDR(signedXdr, this.config.networkPassphrase)
+      );
+      if (sendResult.status === "ERROR") {
+        throw new Error(`Transaction failed: ${JSON.stringify(sendResult.errorResult)}`);
+      }
+
+      const txHash = sendResult.hash;
+      let getResult = await this.server.getTransaction(txHash);
+      let attempts = 0;
+      while (getResult.status === SorobanRpc.Api.GetTransactionStatus.NOT_FOUND && attempts < 20) {
+        await new Promise((r) => setTimeout(r, 1500));
+        getResult = await this.server.getTransaction(txHash);
+        attempts++;
+      }
+      if (getResult.status !== SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        throw new Error(`Transaction not confirmed: ${getResult.status}`);
+      }
+
+      const returnVal =
+        (getResult as SorobanRpc.Api.GetSuccessfulTransactionResponse).returnValue ??
+        xdr.ScVal.scvVoid();
+      const invoiceIds = (scValToNative(returnVal) as (string | number | bigint)[]).map((id) => id.toString());
+
+      telemetry.recordMethod("createInvoiceBatch", true, Date.now() - startTime);
+      return { invoiceIds, txHash };
+    } catch (error) {
+      telemetry.recordMethod("createInvoiceBatch", false, Date.now() - startTime);
+      throw error;
+    }
   }
 
 }
