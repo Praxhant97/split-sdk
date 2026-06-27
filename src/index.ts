@@ -211,6 +211,10 @@ export type {
   OverflowBehavior,
   InvoiceExt,
   PaymentOptions,
+  ClaimPayoutResult,
+  PayWithAttestationParams,
+  AttestationPaymentReceipt,
+  CreatorVolumeCap,
 } from "./types.js";
 export { InvalidTransitionError } from "./types.js";
 

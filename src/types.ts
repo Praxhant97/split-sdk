@@ -524,3 +524,51 @@ export interface RolloverResult {
   /** Transaction hash of the rollover submission. */
   txHash: string;
 }
+
+/** Result of claiming a pending payout. */
+export interface ClaimPayoutResult {
+  /** Transaction hash of the claim submission. */
+  txHash: string;
+  /** Invoice ID the payout was claimed from. */
+  invoiceId: string;
+  /** Recipient address that received the payout. */
+  recipient: string;
+}
+
+/** Parameters for payWithAttestation. */
+export interface PayWithAttestationParams {
+  /** Stellar address of the payer (must sign). */
+  payer: string;
+  /** Invoice ID to pay toward. */
+  invoiceId: string;
+  /** Amount to pay in stroops. */
+  amount: bigint;
+  /** 32-byte hash of the off-chain attestation document. */
+  attestationHash: Uint8Array;
+  /** 64-byte Ed25519 signature over the attestation hash. */
+  signature: Uint8Array;
+  /** Stellar public key of the attestation signer. */
+  signerPubkey: string;
+}
+
+/** Payment receipt returned after a successful payWithAttestation. */
+export interface AttestationPaymentReceipt {
+  /** Transaction hash. */
+  txHash: string;
+  /** Invoice ID paid. */
+  invoiceId: string;
+  /** Amount paid in stroops. */
+  amount: bigint;
+  /** Hex-encoded attestation hash included in the receipt. */
+  attestationHash: string;
+}
+
+/** Creator volume cap information. */
+export interface CreatorVolumeCap {
+  /** Volume cap in token units, or null if uncapped. */
+  cap: bigint | null;
+  /** Lifetime volume used in token units. */
+  used: bigint;
+  /** Remaining volume (cap - used), or Infinity if uncapped. */
+  remaining: bigint | typeof Infinity;
+}
