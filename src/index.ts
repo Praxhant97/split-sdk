@@ -241,3 +241,7 @@ export type {
   SimulationDiffNotComparable,
   ResourceDelta,
 } from "./simulationDiff.js";
+
+// Payment velocity tracking
+export { trackVelocity } from "./velocityTracker.js";
+export type { VelocityReport, InvoiceVelocity, PaymentTrend } from "./velocityTracker.js";
