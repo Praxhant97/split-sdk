@@ -625,6 +625,25 @@ export interface RolloverResult {
   txHash: string;
 }
 
+/** Current velocity-window state for a payer on a velocity-limited invoice. */
+export interface VelocityWindowStatus {
+  /** Unix timestamp (seconds) when the current window opened. */
+  windowStart: number;
+  /** Unix timestamp (seconds) when the current window closes. */
+  windowEnd: number;
+  /** Amount already paid by the payer in the current window, in stroops. */
+  amountUsed: bigint;
+  /** Amount the payer may still pay in the current window, in stroops. */
+  amountRemaining: bigint;
+  /** Maximum amount payable per window, in stroops. */
+  limitPerWindow: bigint;
+}
+
+/**
+ * Result of {@link StellarSplitClient.getVelocityStatus}. Either the active
+ * window state, or `{ limited: false }` when the invoice has no velocity limit.
+ */
+export type VelocityStatus = VelocityWindowStatus | { limited: false };
 /** Result of claiming a pending payout. */
 export interface ClaimPayoutResult {
   /** Transaction hash of the claim submission. */

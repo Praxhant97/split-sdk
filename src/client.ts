@@ -92,6 +92,7 @@ import type {
   PaymentEventRecord,
   PaymentReconciliationReport,
   RolloverResult,
+  VelocityStatus,
   NftGateResult,
   ClaimPayoutResult,
   PayWithAttestationParams,
@@ -112,6 +113,11 @@ import {
 } from "./errors.js";
 import { replayEvents } from "./events.js";
 import { subscribeToInvoice as _subscribeToInvoice } from "./stream.js";
+import { subscribeToInvoice as _subscribeToInvoiceSSE } from "./sse.js";
+import type {
+  InvoiceEventHandler,
+  SubscribeToInvoiceOptions,
+} from "./sse.js";
 import { ConnectionPool } from "./connectionPool.js";
 import { snapshotInvoice as _snapshotInvoice } from "./snapshot.js";
 import type { InvoiceSnapshot } from "./snapshot.js";
@@ -1718,9 +1724,28 @@ export class StellarSplitClient {
   }
 
   // ---------------------------------------------------------------------------
-  // Issue #2 — subscribeToInvoice
+  // Issue #2 / #282 — subscribeToInvoice
   // ---------------------------------------------------------------------------
 
+  /**
+   * Subscribe to real-time invoice events via server-sent events (SSE).
+   *
+   * Pass a single handler function to receive typed `InvoiceEvent` objects
+   * (`payment_received`, `invoice_released`, `invoice_refunded`) without
+   * polling. The connection reconnects automatically with exponential backoff
+   * on drops. The SSE base URL defaults to the client's `horizonUrl` config and
+   * can be overridden via `options.baseUrl`.
+   *
+   * @param invoiceId - The invoice ID to watch.
+   * @param handler   - Called with each typed `InvoiceEvent`.
+   * @param options   - Optional SSE options (base URL, backoff, EventSource factory).
+   * @returns Unsubscribe function that permanently stops the stream.
+   */
+  subscribeToInvoice(
+    invoiceId: string,
+    handler: InvoiceEventHandler,
+    options?: Partial<SubscribeToInvoiceOptions>
+  ): () => void;
   /**
    * Subscribe to live invoice events via Soroban RPC event polling.
    *
@@ -1733,13 +1758,35 @@ export class StellarSplitClient {
     invoiceId: string,
     callbacks: InvoiceEventCallbacks,
     intervalMs?: number
+  ): () => void;
+  subscribeToInvoice(
+    invoiceId: string,
+    handlerOrCallbacks: InvoiceEventHandler | InvoiceEventCallbacks,
+    optionsOrInterval?: Partial<SubscribeToInvoiceOptions> | number
   ): () => void {
+    // A function handler selects the SSE transport; a callbacks object selects
+    // the legacy RPC-polling transport.
+    if (typeof handlerOrCallbacks === "function") {
+      const options =
+        (optionsOrInterval as Partial<SubscribeToInvoiceOptions> | undefined) ?? {};
+      const baseUrl = options.baseUrl ?? this.config.horizonUrl;
+      if (!baseUrl) {
+        throw new Error(
+          "subscribeToInvoice (SSE) requires a base URL: set `horizonUrl` in the client config or pass `{ baseUrl }` in options.",
+        );
+      }
+      return _subscribeToInvoiceSSE(invoiceId, handlerOrCallbacks, {
+        ...options,
+        baseUrl,
+      });
+    }
+
     return _subscribeToInvoice(
       this.server,
       this.config.contractId,
       invoiceId,
-      callbacks,
-      intervalMs
+      handlerOrCallbacks,
+      optionsOrInterval as number | undefined
     );
   }
 
@@ -2717,6 +2764,63 @@ export class StellarSplitClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Issue #285 — Velocity limit status
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check the current velocity-window state for a payer on a specific invoice.
+   *
+   * Reads the on-chain window state via RPC and reports how much the payer can
+   * still pay in the current window. If the invoice has no velocity limit
+   * configured, returns `{ limited: false }`.
+   *
+   * @param invoiceId    - The invoice ID to check.
+   * @param payerAddress - Stellar address of the payer.
+   * @returns The active window state, or `{ limited: false }` if unlimited.
+   */
+  async getVelocityStatus(
+    invoiceId: string,
+    payerAddress: string,
+  ): Promise<VelocityStatus> {
+    const startTime = Date.now();
+    try {
+      const operation = this.contract.call(
+        "get_velocity_status",
+        nativeToScVal(BigInt(invoiceId), { type: "u64" }),
+        nativeToScVal(payerAddress, { type: "address" }),
+      );
+      const raw = await this._simulateView(operation);
+
+      telemetry.recordMethod("getVelocityStatus", true, Date.now() - startTime);
+
+      // No velocity limit configured: contract returns void/null.
+      if (raw === null || raw === undefined) {
+        return { limited: false };
+      }
+
+      const state = raw as Record<string, unknown>;
+      const windowStart = Number(state.window_start ?? state.windowStart ?? 0);
+      const windowEnd = Number(state.window_end ?? state.windowEnd ?? 0);
+      const amountUsed = toBigInt(state.amount_used ?? state.amountUsed);
+      const limitPerWindow = toBigInt(
+        state.limit_per_window ?? state.limitPerWindow,
+      );
+      const remaining = limitPerWindow - amountUsed;
+
+      return {
+        windowStart,
+        windowEnd,
+        amountUsed,
+        limitPerWindow,
+        amountRemaining: remaining > 0n ? remaining : 0n,
+      };
+    } catch (error) {
+      telemetry.recordMethod("getVelocityStatus", false, Date.now() - startTime);
+      throw error;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
 
@@ -3516,4 +3620,12 @@ export class StellarSplitClient {
     }
   }
 
+}
+
+/** Coerce a native-decoded scalar (bigint | number | string) into a bigint, defaulting to 0n. */
+function toBigInt(value: unknown): bigint {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") return BigInt(Math.trunc(value));
+  if (typeof value === "string" && value !== "") return BigInt(value);
+  return 0n;
 }
