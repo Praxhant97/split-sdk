@@ -198,7 +198,7 @@ export interface StellarSplitClientConfig {
   /** Optional wallet adapter for signing (e.g. WalletConnect). Defaults to Freighter. */
   adapter?: WalletAdapter;
   /** Optional in-memory cache configuration. Disabled by default. */
-  cache?: { ttlMs: number };
+  cache?: { enabled?: boolean; ttl?: Record<string, number>; ttlMs?: number };
   /** Optional signing keypair for request signing. */
   signingKeypair?: Keypair;
   /** Optional compliance rules injectable for invoice checks. */
@@ -496,7 +496,7 @@ export class StellarSplitClient {
 
     this._cache =
       config.container?.getCacheStore() ??
-      (config.cache ? new SimpleCache<Invoice>(config.cache.ttlMs) : null);
+      (config.cache ? new SimpleCache<Invoice>(config.cache) : null);
 
     if (config.telemetry) {
       telemetry.init(config.telemetry);
@@ -511,8 +511,8 @@ export class StellarSplitClient {
       addResponseInterceptor(createCompressionResponseInterceptor(config.compression));
     }
 
-    if (config.cache) {
-      this._cache = new SimpleCache<Invoice>(config.cache.ttlMs);
+    if (config.cache && !config.container?.getCacheStore()) {
+      this._cache = new SimpleCache<Invoice>(config.cache);
     }
 
     // Initialize hooks
@@ -561,6 +561,30 @@ export class StellarSplitClient {
       this._batcher?.clear();
       this._batcher = null;
     }
+  }
+
+  /**
+   * Manually invalidate cache entries.
+   * @param method Optional method name to invalidate.
+   * @param args Optional arguments array to invalidate a specific call.
+   */
+  public invalidateCache(method?: string, args?: any[]): void {
+    if (this._cache) {
+      if (typeof (this._cache as any).invalidate === 'function') {
+        (this._cache as any).invalidate(method, args);
+      }
+    }
+  }
+
+  /**
+   * Get cache statistics.
+   * @returns Cache stats including hits, misses, size, and keys.
+   */
+  public getCacheStats(): import("./cache.js").CacheStats | null {
+    if (this._cache && typeof (this._cache as any).getStats === 'function') {
+      return (this._cache as any).getStats();
+    }
+    return null;
   }
 
   private _logAudit(method: string, params: Record<string, unknown>, success: boolean, durationMs: number): void {
@@ -709,26 +733,28 @@ export class StellarSplitClient {
    * @returns The dispute status.
    */
   async getDisputeStatus(invoiceId: string): Promise<DisputeStatus> {
-    const startTime = Date.now();
-    try {
-      const operation = this.contract.call(
-        "get_dispute_status",
-        nativeToScVal(BigInt(invoiceId), { type: "u64" })
-      );
-      const raw = await this._simulateView(operation) as Record<string, unknown>;
-      const status: DisputeStatus = {
-        invoiceId,
-        disputed: Boolean(raw.disputed),
-        arbiter: raw.arbiter as string,
-        resolved: Boolean(raw.resolved),
-        resolution: raw.resolution === "approved" ? "approved" : raw.resolution === "rejected" ? "rejected" : null,
-      };
-      telemetry.recordMethod("getDisputeStatus", true, Date.now() - startTime);
-      return status;
-    } catch (error) {
-      telemetry.recordMethod("getDisputeStatus", false, Date.now() - startTime);
-      throw error;
-    }
+    return this._withCache("getDisputeStatus", [invoiceId], async () => {
+      const startTime = Date.now();
+      try {
+        const operation = this.contract.call(
+          "get_dispute_status",
+          nativeToScVal(BigInt(invoiceId), { type: "u64" })
+        );
+        const raw = await this._simulateView(operation) as Record<string, unknown>;
+        const status: DisputeStatus = {
+          invoiceId,
+          disputed: Boolean(raw.disputed),
+          arbiter: raw.arbiter as string,
+          resolved: Boolean(raw.resolved),
+          resolution: raw.resolution === "approved" ? "approved" : raw.resolution === "rejected" ? "rejected" : null,
+        };
+        telemetry.recordMethod("getDisputeStatus", true, Date.now() - startTime);
+        return status;
+      } catch (error) {
+        telemetry.recordMethod("getDisputeStatus", false, Date.now() - startTime);
+        throw error;
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -997,21 +1023,42 @@ export class StellarSplitClient {
   }
 
   /**
+   * Helper to execute a fetcher with cache support.
+   */
+  private async _withCache<T>(methodName: string, args: any[], fetcher: () => Promise<T>): Promise<T> {
+    const isSimpleCache = this._cache && typeof (this._cache as any).getStats === 'function';
+    
+    if (isSimpleCache) {
+      const key = `${methodName}:${JSON.stringify(args)}`;
+      const cached = (this._cache as any).get(key) as T | undefined;
+      if (cached) return cached;
+    } else if (this._cache && methodName === "getInvoice") {
+      const cached = this._cache.get(args[0]) as T | undefined;
+      if (cached) return cached;
+    }
+    
+    const result = await fetcher();
+    
+    if (isSimpleCache) {
+      const key = `${methodName}:${JSON.stringify(args)}`;
+      (this._cache as any).set(key, result);
+    } else if (this._cache && methodName === "getInvoice") {
+      this._cache.set(args[0], result);
+    }
+    
+    return result;
+  }
+
+  /**
    * Fetch an invoice by ID. Returns cached result if within TTL.
    */
   async getInvoice(invoiceId: string): Promise<Invoice> {
-    if (this._cache) {
-      const cached = this._cache.get(invoiceId);
-      if (cached) return cached;
-    }
-    const fetcher = this._batcher
-      ? () => this._batcher!.getInvoice(invoiceId)
-      : () => this._fetchInvoice(invoiceId);
-    const invoice = await this._dedup.dedupe(invoiceId, fetcher);
-    if (this._cache) {
-      this._cache.set(invoiceId, invoice);
-    }
-    return invoice;
+    return this._withCache("getInvoice", [invoiceId], async () => {
+      const fetcher = this._batcher
+        ? () => this._batcher!.getInvoice(invoiceId)
+        : () => this._fetchInvoice(invoiceId);
+      return await this._dedup.dedupe(invoiceId, fetcher);
+    });
   }
 
   private async _fetchInvoice(invoiceId: string): Promise<Invoice> {
@@ -1252,33 +1299,34 @@ export class StellarSplitClient {
    * @returns Gate status including whether gating applies and NFT ownership.
    */
   async checkNftGate(creatorAddress: string): Promise<NftGateResult> {
-    const startTime = Date.now();
-    const now = Date.now();
-    const cached = this._nftGateCache.get(creatorAddress);
-    if (cached && now - cached.timestamp < NFT_GATE_CACHE_TTL_MS) {
-      telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
-      return cached.result;
-    }
+    return this._withCache("checkNftGate", [creatorAddress], async () => {
+      const startTime = Date.now();
+      const now = Date.now();
+      const cached = this._nftGateCache.get(creatorAddress);
+      if (cached && now - cached.timestamp < NFT_GATE_CACHE_TTL_MS) {
+        telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
+        return cached.result;
+      }
 
-    try {
-      const operation = this.contract.call(
-        "check_nft_gate",
-        nativeToScVal(creatorAddress, { type: "address" })
-      );
+      try {
+        const operation = this.contract.call(
+          "check_nft_gate",
+          nativeToScVal(creatorAddress, { type: "address" })
+        );
 
-      const raw = await this._simulateView(operation);
-      const result = this._parseNftGateResult(raw);
+        const raw = await this._simulateView(operation);
+        const result = this._parseNftGateResult(raw);
 
-      this._nftGateCache.set(creatorAddress, { timestamp: now, result });
-      telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
-      return result;
-    } catch {
-      // If the method doesn't exist or fails, assume no gate is configured.
-      const result: NftGateResult = { gated: false, hasNft: false, contractAddress: null };
-      this._nftGateCache.set(creatorAddress, { timestamp: now, result });
-      telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
-      return result;
-    }
+        this._nftGateCache.set(creatorAddress, { timestamp: now, result });
+        telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
+        return result;
+      } catch {
+        const result: NftGateResult = { gated: false, hasNft: false, contractAddress: null };
+        this._nftGateCache.set(creatorAddress, { timestamp: now, result });
+        telemetry.recordMethod("checkNftGate", true, Date.now() - startTime);
+        return result;
+      }
+    });
   }
 
   /** Clears the NFT gate status cache (useful for testing). */
@@ -1487,21 +1535,23 @@ export class StellarSplitClient {
    * List all template names for a creator.
    */
   async listTemplates(creator: string): Promise<string[]> {
-    const startTime = Date.now();
-    try {
-      const operation = this.contract.call(
-        "list_templates",
-        nativeToScVal(creator, { type: "address" })
-      );
+    return this._withCache("listTemplates", [creator], async () => {
+      const startTime = Date.now();
+      try {
+        const operation = this.contract.call(
+          "list_templates",
+          nativeToScVal(creator, { type: "address" })
+        );
 
-      const templates = await this._simulateView(operation);
-      const result = Array.isArray(templates) ? (templates as string[]) : [];
-      telemetry.recordMethod("listTemplates", true, Date.now() - startTime);
-      return result;
-    } catch (error) {
-      telemetry.recordMethod("listTemplates", false, Date.now() - startTime);
-      throw error;
-    }
+        const templates = await this._simulateView(operation);
+        const result = Array.isArray(templates) ? (templates as string[]) : [];
+        telemetry.recordMethod("listTemplates", true, Date.now() - startTime);
+        return result;
+      } catch (error) {
+        telemetry.recordMethod("listTemplates", false, Date.now() - startTime);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -1585,26 +1635,28 @@ export class StellarSplitClient {
     creator: string,
     options: PaginationOptions = {}
   ): Promise<PaginatedResult<string>> {
-    const limit = options.limit ?? 20;
+    return this._withCache("getInvoicesByCreator", [creator, options], async () => {
+      const limit = options.limit ?? 20;
 
-    const operation = this.contract.call(
-      "get_invoices_by_creator",
-      nativeToScVal(creator, { type: "address" })
-    );
+      const operation = this.contract.call(
+        "get_invoices_by_creator",
+        nativeToScVal(creator, { type: "address" })
+      );
 
-    const raw = await this._simulateView(operation);
-    const allIds: string[] = Array.isArray(raw)
-      ? raw.map((id: unknown) => String(id))
-      : [];
+      const raw = await this._simulateView(operation);
+      const allIds: string[] = Array.isArray(raw)
+        ? raw.map((id: unknown) => String(id))
+        : [];
 
-    const total = allIds.length;
-    const startIndex = options.cursor
-      ? allIds.indexOf(options.cursor) + 1
-      : 0;
-    const page = allIds.slice(startIndex, startIndex + limit);
-    const nextCursor = startIndex + limit < total ? (page[page.length - 1] ?? null) : null;
+      const total = allIds.length;
+      const startIndex = options.cursor
+        ? allIds.indexOf(options.cursor) + 1
+        : 0;
+      const page = allIds.slice(startIndex, startIndex + limit);
+      const nextCursor = startIndex + limit < total ? (page[page.length - 1] ?? null) : null;
 
-    return { items: page, nextCursor, total };
+      return { items: page, nextCursor, total };
+    });
   }
 
   /**
@@ -1618,41 +1670,43 @@ export class StellarSplitClient {
     recipient: string,
     options: PaginationOptions = {}
   ): Promise<PaginatedResult<string>> {
-    const limit = options.limit ?? 20;
+    return this._withCache("getInvoicesByRecipient", [recipient, options], async () => {
+      const limit = options.limit ?? 20;
 
-    const operation = this.contract.call(
-      "get_invoices_by_recipient",
-      nativeToScVal(recipient, { type: "address" })
-    );
+      const operation = this.contract.call(
+        "get_invoices_by_recipient",
+        nativeToScVal(recipient, { type: "address" })
+      );
 
-    const account = await this.server.getAccount(this.config.contractId).catch(() => null);
-    const sourceAccount = account ?? new Account(this.config.contractId, "0");
+      const account = await this.server.getAccount(this.config.contractId).catch(() => null);
+      const sourceAccount = account ?? new Account(this.config.contractId, "0");
 
-    const tx = new TransactionBuilder(sourceAccount, {
-      fee: BASE_FEE,
-      networkPassphrase: this.config.networkPassphrase,
-    })
-      .addOperation(operation)
-      .setTimeout(30)
-      .build();
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: this.config.networkPassphrase,
+      })
+        .addOperation(operation)
+        .setTimeout(30)
+        .build();
 
-    const simResult = await this.server.simulateTransaction(tx);
-    if (SorobanRpc.Api.isSimulationError(simResult)) {
-      throw new Error(`Simulation failed: ${simResult.error}`);
-    }
+      const simResult = await this.server.simulateTransaction(tx);
+      if (SorobanRpc.Api.isSimulationError(simResult)) {
+        throw new Error(`Simulation failed: ${simResult.error}`);
+      }
 
-    const returnVal = (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval;
-    if (!returnVal) throw new Error("No return value from get_invoices_by_recipient");
+      const returnVal = (simResult as SorobanRpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+      if (!returnVal) throw new Error("No return value from get_invoices_by_recipient");
 
-    const raw = scValToNative(returnVal);
-    const allIds: string[] = Array.isArray(raw) ? raw.map((id: unknown) => String(id)) : [];
+      const raw = scValToNative(returnVal);
+      const allIds: string[] = Array.isArray(raw) ? raw.map((id: unknown) => String(id)) : [];
 
-    const total = allIds.length;
-    const startIndex = options.cursor ? allIds.indexOf(options.cursor) + 1 : 0;
-    const page = allIds.slice(startIndex, startIndex + limit);
-    const nextCursor = startIndex + limit < total ? (page[page.length - 1] ?? null) : null;
+      const total = allIds.length;
+      const startIndex = options.cursor ? allIds.indexOf(options.cursor) + 1 : 0;
+      const page = allIds.slice(startIndex, startIndex + limit);
+      const nextCursor = startIndex + limit < total ? (page[page.length - 1] ?? null) : null;
 
-    return { items: page, nextCursor, total };
+      return { items: page, nextCursor, total };
+    });
   }
 
   /**
@@ -2198,10 +2252,7 @@ export class StellarSplitClient {
   // Issue #7 — cache invalidation helpers (public)
   // ---------------------------------------------------------------------------
 
-  /** Manually invalidate a cached invoice entry. */
-  invalidateCache(invoiceId: string): void {
-    this._cache?.invalidate(invoiceId);
-  }
+  // invalidateCache implementation moved up to support MethodCache requirements
 
   /** Clear the entire invoice cache. */
   clearCache(): void {
