@@ -314,8 +314,8 @@ export { MultiplexedClient } from "./multiplexer.js";
 export type { WeightedEndpoint } from "./multiplexer.js";
 
 // Request batcher functionality
-export { RequestBatcher } from "./requestBatcher.js";
-export type { BatcherConfig } from "./requestBatcher.js";
+export { RequestBatcher, BatchedRpcClient } from "./requestBatcher.js";
+export type { BatcherConfig, BatchFetchers, BatchCallType } from "./requestBatcher.js";
 
 export type { ComplianceReport } from "./compliance.js";
 
