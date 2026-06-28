@@ -28,6 +28,8 @@ import type { RetryConfig } from "./retryEngine.js";
 import { TelemetryCollector } from "./telemetryCollector.js";
 import { isFeatureEnabled } from "./flags.js";
 import type { FeatureFlags } from "./flags.js";
+import { PluginRegistry } from "./plugin.js";
+import type { SdkPlugin } from "./plugin.js";
 import { checkRPCHealth } from "./health.js";
 import { Deduplicator } from "./dedup.js";
 import { verifyBatchPayments } from "./batchVerifier.js";
@@ -345,6 +347,7 @@ export class StellarSplitClient {
   private config: StellarSplitClientConfig;
   private _plugins = new Set<string>();
   private _pluginInstances: StellarSplitPlugin[] = [];
+  private _pluginRegistry = new PluginRegistry();
   private _dedup = new Deduplicator<Invoice>();
   private _cache: SimpleCache<Invoice> | ICacheStore<Invoice> | null = null;
   private _auditLogger: AuditLogger | null = null;
@@ -524,6 +527,21 @@ export class StellarSplitClient {
     plugin.install?.(this);
   }
 
+  /** Register a middleware plugin (interceptor-style). */
+  use(plugin: SdkPlugin): void {
+    this._pluginRegistry.use(plugin);
+  }
+
+  /** Deregister a middleware plugin by name. */
+  removePlugin(name: string): void {
+    this._pluginRegistry.removePlugin(name);
+  }
+
+  /** Return the names of all active middleware plugins. */
+  getPlugins(): string[] {
+    return this._pluginRegistry.getPlugins();
+  }
+
   // ---------------------------------------------------------------------------
   // Dispute management
   // ---------------------------------------------------------------------------
@@ -662,6 +680,7 @@ export class StellarSplitClient {
     params: CreateInvoiceParams
   ): Promise<{ invoiceId: string; txHash: string }> {
     const startTime = Date.now();
+    params = this._pluginRegistry.runBeforeCall("createInvoice", params);
     try {
       if (this.config.payloadGuard) {
         validateInvoicePayload(params, this.config.payloadGuard);
@@ -693,11 +712,12 @@ export class StellarSplitClient {
       const durationMs = Date.now() - startTime;
       telemetry.recordMethod("createInvoice", true, durationMs);
       this._logAudit("createInvoice", { creator: params.creator, token: params.token, deadline: params.deadline }, true, durationMs);
-      return { invoiceId, txHash: result.txHash };
+      return this._pluginRegistry.runAfterCall("createInvoice", { invoiceId, txHash: result.txHash });
     } catch (error) {
       const durationMs = Date.now() - startTime;
       telemetry.recordMethod("createInvoice", false, durationMs);
       this._logAudit("createInvoice", { creator: params.creator, token: params.token, deadline: params.deadline }, false, durationMs);
+      this._pluginRegistry.runOnError("createInvoice", error);
       throw error;
     }
   }
@@ -827,6 +847,7 @@ export class StellarSplitClient {
    */
   async pay(params: PayParams): Promise<TxResult> {
     const startTime = Date.now();
+    params = this._pluginRegistry.runBeforeCall("pay", params);
     try {
       const operation = this.contract.call(
         "pay",
@@ -842,9 +863,10 @@ export class StellarSplitClient {
         : await withRetry(submitFn, this.config.maxRetries ?? 3, 1000);
       this._cache?.invalidate(params.invoiceId);
       telemetry.recordMethod("pay", true, Date.now() - startTime);
-      return { txHash: result.txHash };
+      return this._pluginRegistry.runAfterCall("pay", { txHash: result.txHash });
     } catch (error) {
       telemetry.recordMethod("pay", false, Date.now() - startTime);
+      this._pluginRegistry.runOnError("pay", error);
       throw error;
     }
   }
