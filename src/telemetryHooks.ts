@@ -19,6 +19,8 @@ export interface TelemetryErrorContext {
   args?: Record<string, unknown>;
   /** Timestamp when the error occurred (milliseconds since epoch). */
   timestamp: number;
+  /** Trace ID for correlating this error with the originating SDK call. */
+  traceId?: string;
 }
 
 /**
@@ -31,6 +33,8 @@ export interface TelemetryCallStartParams {
   args?: Record<string, unknown>;
   /** Timestamp when the call started (milliseconds since epoch). */
   timestamp: number;
+  /** Unique trace ID for this SDK method invocation. */
+  traceId?: string;
 }
 
 /**
@@ -47,6 +51,8 @@ export interface TelemetryCallEndParams {
   error?: StellarSplitError;
   /** Timestamp when the call ended (milliseconds since epoch). */
   timestamp: number;
+  /** Unique trace ID for this SDK method invocation. */
+  traceId?: string;
 }
 
 /**
