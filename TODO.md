@@ -1,0 +1,11 @@
+- [ ] Add InvoiceField union type and read options/types in src/types.ts
+- [ ] Add runtime validation + filtering helper in src/client.ts
+- [ ] Update StellarSplitClient.getInvoice to accept fields option + typed narrowing
+- [ ] Update getLeaderboard to accept fields option + typed narrowing
+- [ ] Update getInvoiceHistory to accept fields option + typed narrowing
+- [ ] Update getInvoiceExt (public method if present) to accept fields option + typed narrowing
+- [ ] Ensure fields omitted returns full object (backward-compatible)
+- [ ] Ensure fields: [] throws ValidationError
+- [ ] Export new types from src/index.ts
+- [ ] Add/update unit tests for runtime filtering/validation and (where feasible) type-level narrowing
+- [ ] Run TypeScript compile + test suite
