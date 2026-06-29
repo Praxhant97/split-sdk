@@ -14,8 +14,12 @@ export type {
   StellarSplitPlugin,
 } from "./client.js";
 
-export type { RetryOptions, PerMethodRetryOptions } from "./retryPolicy.js";
-export { isRetryable, executeWithRetry } from "./retryPolicy.js";
+export type {
+  TelemetryHooks,
+  TelemetryErrorContext,
+  TelemetryCallStartParams,
+  TelemetryCallEndParams,
+} from "./telemetryHooks.js";
 
 export { PluginRegistry, LoggingPlugin } from "./plugin.js";
 export type { SdkPlugin, SdkMethodName, PluginArgs, PluginResult } from "./plugin.js";
@@ -209,7 +213,6 @@ export type {
   InvoiceEventCallbacks,
   SimulateCreateInvoiceResult,
   SimulatePayResult,
-  InvoiceDiff,
   SDKHealth,
   FeeBreakdown,
   TokenInfo,
@@ -344,6 +347,10 @@ export type { ScheduledPayment } from "./scheduler.js";
 
 export { compileFilter, applyFilter, FilterIndex } from "./invoiceFilter.js";
 export type { FilterCriteria, CompiledFilter } from "./invoiceFilter.js";
+
+// Invoice diff utility
+export { diffInvoices, hasDiff } from "./diff.js";
+export type { InvoiceDiff, InvoiceDiffEntry } from "./diff.js";
 
 export { diffSimulations } from "./simulationDiff.js";
 export type {

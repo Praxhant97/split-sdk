@@ -45,15 +45,6 @@ export class InvalidTransitionError extends Error {
   }
 }
 
-/** Result of comparing two invoices. */
-export interface InvoiceDiff {
-  changed: Array<{
-    field: string;
-    from: unknown;
-    to: unknown;
-  }>;
-}
-
 /** Aggregated SDK health metrics. */
 export interface SDKHealth {
   rpcLatency: number;
