@@ -213,7 +213,6 @@ export type {
   InvoiceEventCallbacks,
   SimulateCreateInvoiceResult,
   SimulatePayResult,
-  InvoiceDiff,
   SDKHealth,
   FeeBreakdown,
   TokenInfo,
@@ -348,6 +347,10 @@ export type { ScheduledPayment } from "./scheduler.js";
 
 export { compileFilter, applyFilter, FilterIndex } from "./invoiceFilter.js";
 export type { FilterCriteria, CompiledFilter } from "./invoiceFilter.js";
+
+// Invoice diff utility
+export { diffInvoices, hasDiff } from "./diff.js";
+export type { InvoiceDiff, InvoiceDiffEntry } from "./diff.js";
 
 export { diffSimulations } from "./simulationDiff.js";
 export type {

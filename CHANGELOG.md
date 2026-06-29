@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
+- **Build invoice diff utility — compare two invoice states (closes #363)**
+  - `diffInvoices(a: Invoice, b: Invoice)` returns structured diff of two invoice objects
+  - Returns `InvoiceDiff` as `{ field: string, before: unknown, after: unknown }[]` — only changed fields listed
+  - Handles nested objects (recipients list, split rules) and arrays (payment history)
+  - BigInt fields compared numerically, not by reference
+  - `hasDiff(a, b)` convenience function returns boolean
+  - Pure functions with no RPC calls or side effects
+  - Full TypeScript types exported: `InvoiceDiff`, `InvoiceDiffEntry`
+  - Useful for cache invalidation, change tracking, and reconciliation
+  - Complete documentation in `docs/INVOICE_DIFF.md`
 - **Add SDK telemetry hooks for error and performance monitoring (closes #362)**
   - `client.setTelemetryHooks({ onError, onCallStart, onCallEnd })` accepts hook functions
   - `onError(err: StellarSplitError, context)` called on every SDK error before it's thrown
